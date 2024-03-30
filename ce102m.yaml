@@ -39,6 +39,7 @@ iec61107:
   update_interval: 30s
 #  receive_timeout: 500ms
 #  flow_control_pin: GPIO32
+#  readout_enabled: true
 
 sensor:
   - platform: iec61107

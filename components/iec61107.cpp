@@ -19,7 +19,8 @@ static constexpr uint8_t LF = 0x0A;
 static constexpr uint8_t NAK = 0x15;
 
 static const uint8_t CMD_OPEN_SESSION[] = {0x2f, 0x3f, 0x21, 0x0d, 0x0a};
-static const uint8_t CMD_ACK_START[] = {ACK, '0', '5', '1', CR, LF};  // 5 = 9600
+static const uint8_t CMD_ACK_ONE_BY_ONE[] = {ACK, '0', '5', '1', CR, LF};  // 5 = 9600
+static const uint8_t CMD_ACK_READOUT[] = {ACK, '0', '5', '0', CR, LF};     // 5 = 9600
 static const uint8_t CMD_CLOSE_SESSION[] = {SOH, 0x42, 0x30, ETX, 0x75};
 
 static constexpr uint8_t BOOT_WAIT_S = 10;
@@ -100,6 +101,7 @@ void IEC61107Component::loop() {
     return;
   const uint32_t now = millis();
 
+  static uint8_t bcc_{0};
   static auto sensor_iterator = this->sensors_.end();
 
   if (!this->is_idling() && now - this->last_transmission_from_meter_timestamp_ >= receive_timeout_ms_) {
@@ -169,9 +171,17 @@ void IEC61107Component::loop() {
       break;
 
     case State::ACK_START:
-      ESP_LOGD(TAG, "ACK_START");
-      this->send_frame_(CMD_ACK_START, sizeof(CMD_ACK_START));
-      this->set_next_state_(State::ACK_START_GET_INFO);
+      if (this->readout_mode_) {
+        ESP_LOGD(TAG, "ACK_START Readout mode");
+        bcc_ = 0;
+        this->send_frame_(CMD_ACK_READOUT, sizeof(CMD_ACK_READOUT));
+        this->set_next_state_(State::READOUT);
+
+      } else {
+        ESP_LOGD(TAG, "ACK_START One by one mode");
+        this->send_frame_(CMD_ACK_ONE_BY_ONE, sizeof(CMD_ACK_ONE_BY_ONE));
+        this->set_next_state_(State::ACK_START_GET_INFO);
+      }
       break;
 
     case State::ACK_START_GET_INFO:
@@ -192,16 +202,72 @@ void IEC61107Component::loop() {
       }
       break;
 
+    case State::READOUT:
+      ESP_LOGD(TAG, "READOUT");
+      if (frame_size = this->receive_frame_()) {
+        if (in_buf_[0] == ETX) {
+          ESP_LOGD(TAG, "ETX Received");
+          bcc_ ^= ETX;  // faster than update_lrc_(in_buf_,1);
+          bool bcc_failed = false;
+          if (bcc_ == in_bcc_) {
+            ESP_LOGD(TAG, "BCC verification is OK");
+          } else {
+            ESP_LOGE(TAG, "BCC verification failed. Expected 0x%02x, got 0x%02x", bcc_, in_bcc_);
+            bcc_failed = true;
+          }
+
+          this->set_next_state_(State::CLOSE_SESSION);
+        } else {
+          ESP_LOGD(TAG, "Data received: %s", in_buf_);
+          for (size_t i = 0; i < frame_size; i++) {
+            bcc_ ^= in_buf_[i];
+          }
+          if (frame_size > 2)
+            in_buf_[frame_size - 2] = 0;
+
+          std::string param_name;
+          std::string val1;
+          std::string val2;
+
+          //   if ('!' == in_buf_[0]) {
+          //     ESP_LOGV(TAG, "Detected end of readout record");
+          //     break;
+          //   }
+
+          if (!parse_line_((const char *) in_buf_, param_name, val1, val2)) {
+            ESP_LOGE(TAG, "Invalid frame format: '%s'", in_buf_);
+            break;
+          }
+
+          ESP_LOGD(TAG, "Data received: param '%s', value1 '%s', value2 '%s'", param_name.c_str(), val1.c_str(),
+                   val2.c_str());
+          std::string param = std::string(param_name) + "()";
+
+          // Update all matching sensors
+          auto range = sensors_.equal_range(param);
+          for (auto it = range.first; it != range.second; ++it) {
+            set_sensor_value_(it, val1.c_str(), val2.c_str());
+          }
+        }
+      }
+      break;
+
     case State::DATA_ENQ:
       if (sensor_iterator == this->sensors_.end()) {
         ESP_LOGD(TAG, "All requests done");
         this->set_next_state_(State::CLOSE_SESSION);
         break;
       } else {
-        ESP_LOGD(TAG, "Requesting data for '%s'", (*sensor_iterator).first.c_str());
-        this->prepare_request_frame_((*sensor_iterator).first);
-        this->send_frame_();
-        this->set_next_state_(State::DATA_RECV);
+        auto sensor = (*sensor_iterator).second;
+        if (sensor->is_failed()) {
+          ESP_LOGW(TAG, "Skipping request for '%s' - too many failures", (*sensor_iterator).first.c_str());
+          this->set_next_state_(State::DATA_NEXT);
+        } else {
+          ESP_LOGD(TAG, "Requesting data for '%s'", (*sensor_iterator).first.c_str());
+          this->prepare_request_frame_((*sensor_iterator).first);
+          this->send_frame_();
+          this->set_next_state_(State::DATA_RECV);
+        }
       }
       break;
 
@@ -225,17 +291,10 @@ void IEC61107Component::loop() {
           break;
         }
 
-        auto sensor = (*sensor_iterator).second;
-        if (sensor->get_type() == SensorType::SENSOR) {
-          static_cast<IEC61107Sensor *>(sensor)->set_value(std::stof(val1));
-        } else {
-#ifdef USE_TEXT_SENSOR
-          (static_cast<IEC61107TextSensor *>(sensor))->set_value(val1.c_str());
-#endif
-        }
-
         ESP_LOGD(TAG, "Data received: param '%s', value1 '%s', value2 '%s'", param_name.c_str(), val1.c_str(),
                  val2.c_str());
+
+        this->set_sensor_value_(sensor_iterator, val1.c_str(), val2.c_str());
         this->set_next_state_(State::DATA_NEXT);
       }
       break;
@@ -243,6 +302,7 @@ void IEC61107Component::loop() {
     case State::DATA_FAIL:
       ESP_LOGW(TAG, "Data request failed. Value for '%s' not received. (Not supported ?)",
                (*sensor_iterator).first.c_str());
+      (*sensor_iterator).second->record_failure();
       this->update_last_transmission_from_meter_timestamp_();
       this->set_next_state_(State::DATA_NEXT);
       break;
@@ -287,6 +347,33 @@ void IEC61107Component::update() {
   }
   ESP_LOGD(TAG, "Starting readout");
   this->set_next_state_(State::OPEN_SESSION);
+}
+
+bool char2float(const char *str, float &value) {
+  char *end;
+  value = strtof(str, &end);
+  return *end == '\0';
+}
+
+bool IEC61107Component::set_sensor_value_(SensorMap::iterator &it, const char *value1, const char *value2) {
+  auto *sensor = it->second;
+  auto type = sensor->get_type();
+  bool ret = true;
+
+  if (type == SensorType::SENSOR) {
+    float f = 0;
+    if (ret = char2float(value1, f)) {
+      static_cast<IEC61107Sensor *>(sensor)->set_value(std::stof(value1));
+    } else {
+      ESP_LOGE(TAG, "Cannot convert incoming data to a number. Consider using a text sensor. Invalid data: '%s'",
+               value1);
+    }
+  } else {
+#ifdef USE_TEXT_SENSOR
+    static_cast<IEC61107TextSensor *>(sensor)->set_value(value1);
+#endif
+  }
+  return ret;
 }
 
 uint8_t checksum_7f(const uint8_t *data, size_t length) {
@@ -416,8 +503,8 @@ size_t IEC61107Component::receive_frame_() {
         return ret_val;
       }
     }
-
-    if (!stx_detected &&
+    bool crlfdata_out = !stx_detected || this->readout_mode_;
+    if (crlfdata_out &&
         (data_in_size_ >= 2 && '\r' == in_buf_[data_in_size_ - 2] && '\n' == in_buf_[data_in_size_ - 1])) {
       ESP_LOGV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
 
