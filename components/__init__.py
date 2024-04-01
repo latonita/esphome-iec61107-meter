@@ -7,6 +7,7 @@ from esphome.const import (
     CONF_RECEIVE_TIMEOUT,
     CONF_UPDATE_INTERVAL,
     CONF_FLOW_CONTROL_PIN,
+    CONF_INDEX,
 )
 
 CODEOWNERS = ["@latonita"]
@@ -17,6 +18,7 @@ DEPENDENCIES = ["uart"]
 
 CONF_IEC61107_ID = "iec61107_id"
 CONF_REQUEST = "request"
+CONF_READOUT_ENABLED = "readout_enabled"
 
 iec61107_ns = cg.esphome_ns.namespace("iec61107")
 IEC61107Component = iec61107_ns.class_(
@@ -36,6 +38,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
             cv.Optional(CONF_RECEIVE_TIMEOUT, default="500ms"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): cv.update_interval,
+            cv.Optional(CONF_READOUT_ENABLED, default=False): cv.boolean,
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -58,14 +61,5 @@ async def to_code(config):
         pin = await cg.gpio_pin_expression(config[CONF_FLOW_CONTROL_PIN])
         cg.add(var.set_flow_control_pin(pin))
 
-    # if CONF_BAUD_RATE_MAX in config:
-    #     cg.add(var.set_config_baud_rate_max(config[CONF_BAUD_RATE_MAX]))
-
-    # if CONF_BATTERY_METER in config:
-    #     cg.add(var.set_battery_meter(config[CONF_BATTERY_METER]))
-
-    # if CONF_RETRY_COUNTER_MAX in config:
-    #     cg.add(var.set_max_retry_counter(config[CONF_RETRY_COUNTER_MAX]))
-
-    # if CONF_RETRY_DELAY in config:
-    #     cg.add(var.set_retry_delay(config[CONF_RETRY_DELAY]))
+    if CONF_READOUT_ENABLED in config:
+        cg.add(var.set_enable_readout(config[CONF_READOUT_ENABLED]))

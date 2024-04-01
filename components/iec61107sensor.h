@@ -14,11 +14,14 @@ enum SensorType { SENSOR, TEXT_SENSOR };
 
 class IEC61107SensorBase {
  public:
-  virtual SensorType get_type() = 0;
+  virtual SensorType get_type() const = 0;
   virtual void publish() = 0;
 
   void set_request(const char *req) { request_ = req; };
-  std::string get_request() { return request_; }
+  const std::string &get_request() const { return request_; }
+
+  void set_index(const uint8_t idx) { idx_ = idx; };
+  uint8_t get_index() const { return idx_; };
 
   void reset() {
     has_value_ = false;
@@ -38,13 +41,14 @@ class IEC61107SensorBase {
 
  protected:
   std::string request_;
+  uint8_t idx_{1};
   bool has_value_;
   uint8_t tries_{0};
 };
 
 class IEC61107Sensor : public IEC61107SensorBase, public sensor::Sensor {
  public:
-  SensorType get_type() override { return SENSOR; }
+  SensorType get_type() const override { return SENSOR; }
   void publish() override { publish_state(value_); }
 
   void set_value(float value) {
@@ -60,7 +64,7 @@ class IEC61107Sensor : public IEC61107SensorBase, public sensor::Sensor {
 #ifdef USE_TEXT_SENSOR
 class IEC61107TextSensor : public IEC61107SensorBase, public text_sensor::TextSensor {
  public:
-  SensorType get_type() override { return TEXT_SENSOR; }
+  SensorType get_type() const override { return TEXT_SENSOR; }
   void publish() override { publish_state(value_); }
 
   void set_value(const char *value) {
