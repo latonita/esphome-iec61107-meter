@@ -15,7 +15,7 @@
 namespace esphome {
 namespace iec61107 {
 
-static const size_t MAX_IN_BUF_SIZE = 128;
+static const size_t MAX_IN_BUF_SIZE = 256;
 static const size_t MAX_OUT_BUF_SIZE = 84;
 
 const uint8_t VAL_NUM = 4;

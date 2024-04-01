@@ -116,7 +116,7 @@ void IEC61107Component::loop() {
     case State::OPEN_SESSION:
       this->report_state_();
       this->clear_uart_input_buffer_();
-//      iuart_->update_baudrate(300);
+      //      iuart_->update_baudrate(300);
       this->send_frame_(CMD_OPEN_SESSION, sizeof(CMD_OPEN_SESSION));
       this->set_next_state_(State::OPEN_SESSION_GET_ID);
       sensor_iterator = this->sensors_.begin();
@@ -155,7 +155,7 @@ void IEC61107Component::loop() {
           return;
         }
         this->prepare_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
-        this->out_buf_[2] = '5'; //this->baud_rate_identification_;
+        this->out_buf_[2] = '5';  // this->baud_rate_identification_;
         this->out_buf_[3] = this->readout_mode_ ? '0' : '1';
         this->send_frame_();
 
@@ -205,10 +205,16 @@ void IEC61107Component::loop() {
           this->set_next_state_(State::CLOSE_SESSION);
         } else {
           update_bcc_(in_buf_, frame_size);
+          if (in_buf_[0] == '!' && frame_size == 3) {
+            ESP_LOGD(TAG, "End of readout marker received");
+            this->update_last_transmission_from_meter_timestamp_();
+            break;
+          }
+
           if (frame_size > 2)
             in_buf_[frame_size - 2] = 0;
 
-          ESP_LOGD(TAG, "Data received: %s", in_buf_);
+          ESP_LOGD(TAG, "Data received: '%s' (%d)", in_buf_, frame_size);
 
           std::string param_name;
           ValuesArray vals;
@@ -229,6 +235,7 @@ void IEC61107Component::loop() {
                 set_sensor_value_(it, vals);
             }
           }
+          this->update_last_transmission_from_meter_timestamp_();
         }
       }
       break;
@@ -441,6 +448,7 @@ size_t IEC61107Component::receive_frame_() {
 
   static bool soh_detected = false;
   static bool stx_detected = false;
+  static bool etx_detected = false;
 
   uint32_t while_start = millis();
   uint8_t *p;
@@ -464,22 +472,11 @@ size_t IEC61107Component::receive_frame_() {
       }
     }
 
-    if (SOH == in_buf_[data_in_size_ - 1]) {
-      ESP_LOGV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
-      ESP_LOGV(TAG, "Detected SOH");
-      reset_bcc_();
-      update_last_transmission_from_meter_timestamp_();
-      ret_val = data_in_size_;
-      data_in_size_ = 0;
-      soh_detected = true;
-      stx_detected = false;
-      return 0;  // ret_val;
-    }
-
     // it is not possible to have \r\n and ETX in buffer at one time
     if (data_in_size_ >= 2 && ETX == in_buf_[data_in_size_ - 2]) {
-      ESP_LOGV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
+      ESP_LOGV(TAG, "RX.1: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
       ESP_LOGV(TAG, "Detected ETX");
+      etx_detected = true;
 
       in_bcc_ = in_buf_[data_in_size_ - 1];
       ESP_LOGV(TAG, "BCC: 0x%02x", in_bcc_);
@@ -492,8 +489,20 @@ size_t IEC61107Component::receive_frame_() {
       return ret_val;
     }
 
+    if (SOH == in_buf_[data_in_size_ - 1]) {
+      ESP_LOGV(TAG, "RX.2: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
+      ESP_LOGV(TAG, "Detected SOH");
+      reset_bcc_();
+      update_last_transmission_from_meter_timestamp_();
+      ret_val = data_in_size_;
+      data_in_size_ = 0;
+      soh_detected = true;
+      stx_detected = false;
+      return 0;  // ret_val;
+    }
+
     if (STX == in_buf_[data_in_size_ - 1]) {
-      ESP_LOGV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
+      ESP_LOGV(TAG, "RX.3: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
       if (soh_detected) {
         ESP_LOGV(TAG, "Detected STX after SOH");
         soh_detected = false;
@@ -517,7 +526,7 @@ size_t IEC61107Component::receive_frame_() {
     bool crlfdata_out = !stx_detected || this->readout_mode_;
     if (crlfdata_out &&
         (data_in_size_ >= 2 && '\r' == in_buf_[data_in_size_ - 2] && '\n' == in_buf_[data_in_size_ - 1])) {
-      ESP_LOGV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
+      ESP_LOGV(TAG, "RX.4: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
 
       // check echo
       if (data_in_size_ == data_out_size_ && 0 == memcmp(out_buf_, in_buf_, data_out_size_)) {
