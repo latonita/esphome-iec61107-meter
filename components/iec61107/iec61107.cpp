@@ -409,15 +409,28 @@ void IEC61107Component::set_next_state_delayed_(uint32_t ms, State next_state) {
   next_state_after_wait_ = next_state;
 }
 
+uint8_t checksum_7f(const uint8_t *data, size_t length) {
+  uint8_t crc = 0;
+  if (length < 2) {
+    return 0;
+  }
+  for (size_t i = 1; i < length - 1; i++) {
+    crc += data[i];
+  }
+  return crc & 0x7f;
+}
+
 void IEC61107Component::prepare_request_frame_(const std::string &request) {
   // assume request has format "XXXX(params)" if there is closing bracket
   // if not - assume it is "XXXX" and add ()
   std::string frame = "\x01R1\x02" + request + (request.back() == ')' ? "\x03" : "()\x03");
   memcpy(out_buf_, frame.c_str(), frame.size());
   data_out_size_ = frame.size() + 1;
-  this->reset_bcc_();
-  this->update_bcc_(out_buf_, data_out_size_);
-  out_buf_[data_out_size_ - 1] = this->bcc_;
+  uint8_t bcc = checksum_7f(out_buf_, data_out_size_);
+  out_buf_[data_out_size_ - 1] = bcc;
+  // this->reset_bcc_();
+  // this->update_bcc_(out_buf_, data_out_size_);
+  out_buf_[data_out_size_ - 1] = bcc;
 }
 
 void IEC61107Component::send_frame_() {
@@ -658,9 +671,10 @@ void IEC61107Component::reset_bcc_() { this->bcc_ = 0; }
 
 void IEC61107Component::update_bcc_(const uint8_t *data, size_t size) {
   for (size_t i = 0; i < size; i++) {
-    this->bcc_ += data[i];
+    this->bcc_ = (this->bcc_ + data[i]) & 0x7f;
+    //    this->bcc_ += data[i];
   }
-  this->bcc_ &= 0x7f;
+//  this->bcc_ &= 0x7f;
 }
 
 void IEC61107Component::report_state_() {
