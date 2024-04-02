@@ -388,7 +388,8 @@ bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValuesArra
 
   if (type == SensorType::SENSOR) {
     float f = 0;
-    if (ret = !vals[idx].empty() && char2float(str, f)) {
+    ret = !vals[idx].empty() && char2float(str, f);
+    if (ret) {
       static_cast<IEC61107Sensor *>(sensor)->set_value(std::stof(str));
     } else {
       ESP_LOGE(TAG, "Cannot convert incoming data to a number. Consider using a text sensor. Invalid data: '%s'", str);
@@ -478,11 +479,6 @@ size_t IEC61107Component::receive_frame_() {
       p = &in_buf_[data_in_size_];
       if (!iuart_->read_one_byte(p)) {
         return 0;
-      }
-
-      if (!stx_detected) {
-        ESP_LOGD(TAG, "Skipping zeroes before STX");
-        continue;
       }
 
       data_in_size_++;
