@@ -483,6 +483,7 @@ size_t IEC61107Component::receive_frame_() {
       }
       if (etx_detected && *p == 0) {
         // skip zeroes after ETX
+        ESP_LOGV(TAG, "Skipping zeroes after ETX");
         continue;
       }
       data_in_size_++;
