@@ -536,6 +536,11 @@ size_t IEC61107Component::receive_frame_() {
         ESP_LOGV(TAG, "Detected STX with data before it");
         reset_bcc_();
         update_last_transmission_from_meter_timestamp_();
+        if (data_in_size_ > 2 && in_buf_[data_in_size_ -2] == 0) {
+          ESP_LOGV(TAG, ".. zeroes before STX. Wait for more data.");
+          return 0;
+          
+        }
         ret_val = data_in_size_;
         data_in_size_ = 0;
         return ret_val;
