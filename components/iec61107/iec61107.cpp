@@ -88,7 +88,7 @@ void IEC61107Component::loop() {
     return;
   const uint32_t now = millis();
   static uint32_t started_ms{0};
-  uint32_t baud_rate;
+  uint32_t baud_rate = 4800;
 
   static auto req_iterator = this->requests_.end();
   static auto sens_iterator = this->sensors_.end();
@@ -122,7 +122,7 @@ void IEC61107Component::loop() {
       started_ms = millis();
       this->report_state_();
       this->clear_uart_input_buffer_();
-      //      iuart_->update_baudrate(300);
+            iuart_->update_baudrate(300);
       this->send_frame_(CMD_OPEN_SESSION, sizeof(CMD_OPEN_SESSION));
       this->set_next_state_(State::OPEN_SESSION_GET_ID);
       req_iterator = this->requests_.begin();
@@ -161,8 +161,8 @@ void IEC61107Component::loop() {
           return;
         }
         this->prepare_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
-        this->out_buf_[2] = '5';  // this->baud_rate_identification_;
-        this->out_buf_[3] = this->readout_mode_ ? '0' : '1';
+        this->out_buf_[2] = '4'; //4800 // this->baud_rate_identification_;
+        this->out_buf_[3] = '1';//this->readout_mode_ ? '0' : '1';
         this->send_frame_();
 
         this->set_next_state_delayed_(WAIT_BETWEEN_REQUESTS_MS, State::SET_BAUD_RATE);
@@ -171,8 +171,8 @@ void IEC61107Component::loop() {
 
     case State::SET_BAUD_RATE:
       // baud_rate = identification_to_baud_rate_(this->baud_rate_identification_);
-      // ESP_LOGV(TAG, "Baudrate set to: %u bps", baud_rate);
-      // iuart_->update_baudrate(baud_rate);
+       ESP_LOGV(TAG, "Baudrate set to: %u bps", baud_rate);
+       iuart_->update_baudrate(baud_rate);
 
       this->set_next_state_(this->readout_mode_ ? State::READOUT : State::ACK_START_GET_INFO);
       break;
