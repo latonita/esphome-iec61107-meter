@@ -4,21 +4,25 @@
 #ifdef USE_ESP_IDF
 #include "esphome/components/uart/uart_component_esp_idf.h"
 #include "esphome/core/log.h"
+
+static const uint32_t TIMEOUT = 20;  // default value in uart implementation is 100ms
 #endif
 
 #ifdef USE_ESP32_FRAMEWORK_ARDUINO
 #include "esphome/components/uart/uart_component_esp32_arduino.h"
 #include <HardwareSerial.h>
+
+static const uint32_t TIMEOUT = 20;  // default value in uart implementation is 100ms
 #endif
 
 #ifdef USE_ESP8266
 #include "esphome/components/uart/uart_component_esp8266.h"
+
+static const uint32_t TIMEOUT = 40;  // default value in uart implementation is 100ms
 #endif
 
 namespace esphome {
 namespace iec61107 {
-
-static const uint32_t TIMEOUT = 20;  // default value in uart implementation is 100ms
 
 #ifdef USE_ESP32_FRAMEWORK_ARDUINO
 
