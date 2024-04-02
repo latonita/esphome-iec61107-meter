@@ -6,8 +6,9 @@
 #include <cstdint>
 #include <string>
 #include <memory>
-//#include <unordered_map>
+#include <unordered_map>
 #include <list>
+#include <set>
 
 #include "iec61107uart.h"
 #include "iec61107sensor.h"
@@ -20,7 +21,8 @@ static const size_t MAX_OUT_BUF_SIZE = 84;
 
 const uint8_t VAL_NUM = 4;
 using ValuesArray = std::array<std::string, VAL_NUM>;
-using SensorMap = std::list<IEC61107SensorBase *>;  // std::unordered_multimap<std::string, IEC61107SensorBase *>;
+using SensorMap = std::unordered_multimap<std::string, IEC61107SensorBase *>;
+using RequestsSet = std::set<std::string>;
 
 class IEC61107Component : public PollingComponent, public uart::UARTDevice {
  public:
@@ -43,7 +45,8 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   GPIOPin *flow_control_pin_{nullptr};
   std::unique_ptr<IEC61107UART> iuart_;
   SensorMap sensors_;
-  bool readout_mode_{true};
+  RequestsSet requests_;
+  bool readout_mode_{false};
 
   enum class State : uint8_t {
     NOT_INITIALIZED,

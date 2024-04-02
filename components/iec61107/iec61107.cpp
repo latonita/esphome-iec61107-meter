@@ -65,13 +65,16 @@ void IEC61107Component::dump_config() {
   ESP_LOGCONFIG(TAG, "  Receive Timeout: %ums", this->receive_timeout_ms_);
   ESP_LOGCONFIG(TAG, "  Meter Type: CE102M");
   ESP_LOGCONFIG(TAG, "  Sensors:");
-  for (const auto &item : sensors_) {
-    auto *s = item;
+  for (const auto &sensors : sensors_) {
+    auto &s = sensors.second;
     ESP_LOGCONFIG(TAG, "    REQUEST: %s", s->get_request().c_str());
   }
 }
 
-void IEC61107Component::register_sensor(IEC61107SensorBase *sensor) { this->sensors_.push_back(sensor); }
+void IEC61107Component::register_sensor(IEC61107SensorBase *sensor) {
+  this->sensors_.insert({sensor->get_request(), sensor});
+  this->requests_.insert(sensor->get_request());
+}
 
 void IEC61107Component::abort_mission_() {
   // try close connection ?
@@ -84,9 +87,11 @@ void IEC61107Component::loop() {
   if (!this->is_ready() || this->state_ == State::NOT_INITIALIZED)
     return;
   const uint32_t now = millis();
+  static uint32_t started_ms{0};
   uint32_t baud_rate;
 
-  static auto sensor_iterator = this->sensors_.end();
+  static auto req_iterator = this->requests_.end();
+  static auto sens_iterator = this->sensors_.end();
 
   if (!this->is_idling() && now - this->last_transmission_from_meter_timestamp_ >= receive_timeout_ms_) {
     ESP_LOGE(TAG, "No transmission from the meter.");
@@ -114,12 +119,13 @@ void IEC61107Component::loop() {
       break;
 
     case State::OPEN_SESSION:
+      started_ms = millis();
       this->report_state_();
       this->clear_uart_input_buffer_();
       //      iuart_->update_baudrate(300);
       this->send_frame_(CMD_OPEN_SESSION, sizeof(CMD_OPEN_SESSION));
       this->set_next_state_(State::OPEN_SESSION_GET_ID);
-      sensor_iterator = this->sensors_.begin();
+      req_iterator = this->requests_.begin();
       break;
 
     case State::OPEN_SESSION_GET_ID:
@@ -229,12 +235,13 @@ void IEC61107Component::loop() {
           std::string param = std::string(param_name) + "()";
 
           // Update all matching sensors
-          for (auto it : sensors_) {
-            if (it->get_request().compare(param) == 0) {
-              if (!it->is_failed())
-                set_sensor_value_(it, vals);
-            }
+          auto range = sensors_.equal_range(param);
+          for (auto it = range.first; it != range.second; ++it) {
+            if (!it->second->is_failed())
+              set_sensor_value_(it->second, vals);
           }
+
+          // Update all matching sensors
           this->update_last_transmission_from_meter_timestamp_();
         }
       }
@@ -242,30 +249,29 @@ void IEC61107Component::loop() {
 
     case State::DATA_ENQ:
       this->report_state_();
-      if (sensor_iterator == this->sensors_.end()) {
+      if (req_iterator == this->requests_.end()) {
         ESP_LOGD(TAG, "All requests done");
         this->set_next_state_(State::CLOSE_SESSION);
         break;
       } else {
-        auto sensor = *sensor_iterator;
-        if (sensor->is_failed()) {
-          ESP_LOGW(TAG, "Skipping request for '%s', idx=%d - too many failures", sensor->get_request().c_str(),
-                   sensor->get_index());
-          this->set_next_state_(State::DATA_NEXT);
-        } else {
-          ESP_LOGD(TAG, "Requesting data for '%s', idx=%d", sensor->get_request().c_str(), sensor->get_index());
-          this->prepare_request_frame_(sensor->get_request());
-          this->send_frame_();
-          this->set_next_state_(State::DATA_RECV);
-        }
+        auto meter_function = *req_iterator;
+        // if (sensor->is_failed()) {
+        //   ESP_LOGW(TAG, "Skipping request for '%s', idx=%d - too many failures", sensor->get_request().c_str(),
+        //            sensor->get_index());
+        //   this->set_next_state_(State::DATA_NEXT);
+        // } else {
+        ESP_LOGD(TAG, "Requesting data for '%s'", meter_function.c_str());
+        this->prepare_request_frame_(meter_function);
+        this->send_frame_();
+        this->set_next_state_(State::DATA_RECV);
+        //        }
       }
       break;
 
     case State::DATA_RECV:
       this->report_state_();
       if (frame_size = this->receive_frame_()) {
-        ESP_LOGD(TAG, "Data received for '%s', idx=%d", (*sensor_iterator)->get_request().c_str(),
-                 (*sensor_iterator)->get_index());
+        ESP_LOGD(TAG, "Data received for '%s'", (*req_iterator).c_str());
 
         if (in_bcc_ == in_buf_[frame_size - 1]) {
           ESP_LOGV(TAG, "BCC OK");
@@ -286,25 +292,29 @@ void IEC61107Component::loop() {
 
         std::string param = std::string(param_name) + "()";
 
-        if (!(*sensor_iterator)->is_failed())
-          set_sensor_value_(*sensor_iterator, vals);
+        // Update all matching sensors
+        auto range = sensors_.equal_range(param);
+        for (auto it = range.first; it != range.second; ++it) {
+          ESP_LOGD(TAG, "Sensor %s, idx %d", it->second->get_request().c_str(), it->second->get_index());
+          if (!it->second->is_failed())
+            set_sensor_value_(it->second, vals);
+        }
         this->set_next_state_(State::DATA_NEXT);
       }
       break;
 
     case State::DATA_FAIL:
       this->report_state_();
-      ESP_LOGW(TAG, "Data request failed. Value for '%s' not received. (Not supported ?)",
-               (*sensor_iterator)->get_request().c_str());
-      (*sensor_iterator)->record_failure();
+      ESP_LOGW(TAG, "Data request failed. Value for '%s' not received. (Not supported ?)", (*req_iterator).c_str());
+      //(*req_iterator)->record_failure();
       this->update_last_transmission_from_meter_timestamp_();
       this->set_next_state_(State::DATA_NEXT);
       break;
 
     case State::DATA_NEXT:
       this->report_state_();
-      sensor_iterator++;
-      if (sensor_iterator != this->sensors_.end()) {
+      req_iterator++;
+      if (req_iterator != this->requests_.end()) {
         this->set_next_state_delayed_(WAIT_BETWEEN_REQUESTS_MS, State::DATA_ENQ);
       } else {
         this->set_next_state_delayed_(WAIT_BETWEEN_REQUESTS_MS, State::CLOSE_SESSION);
@@ -315,7 +325,8 @@ void IEC61107Component::loop() {
       ESP_LOGD(TAG, "Closing session");
       this->send_frame_(CMD_CLOSE_SESSION, sizeof(CMD_CLOSE_SESSION));
       this->set_next_state_(State::PUBLISH);
-      sensor_iterator = this->sensors_.begin();
+      ESP_LOGD(TAG, "Total connection time: %u ms", millis() - started_ms);
+      sens_iterator = this->sensors_.begin();
       break;
 
     case State::PUBLISH:
@@ -323,10 +334,12 @@ void IEC61107Component::loop() {
       ESP_LOGD(TAG, "Publishing data");
       this->update_last_transmission_from_meter_timestamp_();
 
-      if (sensor_iterator != this->sensors_.end()) {
-        (*sensor_iterator)->publish();
-        sensor_iterator++;
+      if (sens_iterator != this->sensors_.end()) {
+        sens_iterator->second->publish();
+        sens_iterator++;
       } else {
+        ESP_LOGD(TAG, "Data collection and publishing finished.");
+        ESP_LOGD(TAG, "Total time: %u ms", millis() - started_ms);
         this->set_next_state_(State::IDLE);
       }
       break;
@@ -338,10 +351,10 @@ void IEC61107Component::loop() {
 
 void IEC61107Component::update() {
   if (this->state_ != State::IDLE) {
-    ESP_LOGD(TAG, "Starting readout - component not ready");
+    ESP_LOGD(TAG, "Starting data collection impossible - component not ready");
     return;
   }
-  ESP_LOGD(TAG, "Starting readout");
+  ESP_LOGD(TAG, "Starting data collection");
   this->set_next_state_(State::OPEN_SESSION);
 }
 
@@ -388,17 +401,6 @@ bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValuesArra
   return ret;
 }
 
-uint8_t checksum_7f(const uint8_t *data, size_t length) {
-  uint8_t crc = 0;
-  if (length < 2) {
-    return 0;
-  }
-  for (size_t i = 1; i < length - 1; i++) {
-    crc += data[i];
-  }
-  return crc & 0x7f;
-}
-
 void IEC61107Component::set_next_state_delayed_(uint32_t ms, State next_state) {
   ESP_LOGD(TAG, "Short delay before next step for %u ms", ms);
   set_next_state_(State::WAIT);
@@ -413,8 +415,9 @@ void IEC61107Component::prepare_request_frame_(const std::string &request) {
   std::string frame = "\x01R1\x02" + request + (request.back() == ')' ? "\x03" : "()\x03");
   memcpy(out_buf_, frame.c_str(), frame.size());
   data_out_size_ = frame.size() + 1;
-  uint8_t bcc = checksum_7f(out_buf_, data_out_size_);
-  out_buf_[data_out_size_ - 1] = bcc;
+  this->reset_bcc_();
+  this->update_bcc_(out_buf_, data_out_size_);
+  out_buf_[data_out_size_ - 1] = this->bcc_;
 }
 
 void IEC61107Component::send_frame_() {
@@ -651,18 +654,13 @@ bool IEC61107Component::parse_line_(const char *line, std::string &out_param_nam
   return true;
 }
 
-void IEC61107Component::reset_bcc_() {
-  //  ESP_LOGD(TAG, "Reset BCC. Was 0x%02x.", bcc_);
-  this->bcc_ = 0;
-}
+void IEC61107Component::reset_bcc_() { this->bcc_ = 0; }
 
 void IEC61107Component::update_bcc_(const uint8_t *data, size_t size) {
   for (size_t i = 0; i < size; i++) {
-    //    ESP_LOGD(TAG, "BCC: 0x%02x ^= 0x%02x => 0x%02x", this->bcc_, data[i], (uint8_t) 0x7f & (this->bcc_ +
-    //    data[i]));
-    // this->bcc_ ^= data[i];
-    this->bcc_ = (this->bcc_ + data[i]) & 0x7f;
+    this->bcc_ += data[i];
   }
+  this->bcc_ &= 0x7f;
 }
 
 void IEC61107Component::report_state_() {
