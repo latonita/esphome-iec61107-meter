@@ -263,7 +263,7 @@ void IEC61107Component::loop() {
         ESP_LOGD(TAG, "Requesting data for '%s'", meter_function.c_str());
         this->prepare_request_frame_(meter_function);
         this->send_frame_();
-        this->set_next_state_(State::DATA_RECV);
+        this->set_next_state_delayed_(150, State::DATA_RECV);
         //        }
       }
       break;
