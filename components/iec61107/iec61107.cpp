@@ -474,13 +474,17 @@ size_t IEC61107Component::receive_frame_() {
     if (millis() - while_start > max_while_ms) {
       return 0;
     }
-
+    
+    
     if (data_in_size_ < MAX_IN_BUF_SIZE) {
       p = &in_buf_[data_in_size_];
       if (!iuart_->read_one_byte(p)) {
         return 0;
       }
-
+      if (etx_detected && *p == 0) {
+        // skip zeroes after ETX
+        continue;
+      }
       data_in_size_++;
     } else {
       memmove(in_buf_, in_buf_ + 1, data_in_size_ - 1);
