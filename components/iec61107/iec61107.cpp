@@ -130,7 +130,7 @@ void IEC61107Component::loop() {
 
     case State::OPEN_SESSION_GET_ID:
       this->report_state_();
-      if (frame_size = this->receive_frame_()) {
+      if ((frame_size = this->receive_frame_())) {
         char *packet = this->get_id_(frame_size);
 
         if (packet == nullptr) {
@@ -179,7 +179,7 @@ void IEC61107Component::loop() {
 
     case State::ACK_START_GET_INFO:
       this->report_state_();
-      if (frame_size = this->receive_frame_()) {
+      if ((frame_size = this->receive_frame_())) {
         std::string param_name;
         ValuesArray vals;
 
@@ -194,7 +194,7 @@ void IEC61107Component::loop() {
 
     case State::READOUT:
       this->report_state_();
-      if (frame_size = this->receive_frame_()) {
+      if ((frame_size = this->receive_frame_())) {
         if (in_buf_[0] == ETX) {
           ESP_LOGD(TAG, "ETX Received");
           // bcc_ ^= ETX;  // faster than update_bcc_(in_buf_,1);
@@ -270,7 +270,7 @@ void IEC61107Component::loop() {
 
     case State::DATA_RECV:
       this->report_state_();
-      if (frame_size = this->receive_frame_()) {
+      if ((frame_size = this->receive_frame_())) {
         ESP_LOGD(TAG, "Data received for '%s'", (*req_iterator).c_str());
 
         if (in_bcc_ == in_buf_[frame_size - 1]) {
