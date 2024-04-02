@@ -18,7 +18,7 @@ static const uint32_t TIMEOUT = 20;  // default value in uart implementation is 
 #ifdef USE_ESP8266
 #include "esphome/components/uart/uart_component_esp8266.h"
 
-static const uint32_t TIMEOUT = 40;  // default value in uart implementation is 100ms
+static const uint32_t TIMEOUT = 50;  // default value in uart implementation is 100ms
 #endif
 
 namespace esphome {

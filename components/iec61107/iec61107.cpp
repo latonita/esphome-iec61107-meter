@@ -479,6 +479,12 @@ size_t IEC61107Component::receive_frame_() {
       if (!iuart_->read_one_byte(p)) {
         return 0;
       }
+
+      if (!stx_detected) {
+        ESP_LOGD(TAG, "Skipping zeroes before STX");
+        continue;
+      }
+
       data_in_size_++;
     } else {
       memmove(in_buf_, in_buf_ + 1, data_in_size_ - 1);
