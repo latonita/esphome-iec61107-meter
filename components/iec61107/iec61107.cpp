@@ -67,7 +67,7 @@ void IEC61107Component::dump_config() {
   ESP_LOGCONFIG(TAG, "  Sensors:");
   for (const auto &sensors : sensors_) {
     auto &s = sensors.second;
-    ESP_LOGCONFIG(TAG, "    REQUEST: %s", s->get_request().c_str());
+    ESP_LOGCONFIG(TAG, "    REQUEST: %s", s->get_request());
   }
 }
 
@@ -233,7 +233,7 @@ void IEC61107Component::loop() {
           snprintf(param_buff, 31, "%s()", in_buf_);
 
           // Update all matching sensors
-          auto range = sensors_.equal_range(std::string(param_buff));
+          auto range = sensors_.equal_range(param_buff);
           for (auto it = range.first; it != range.second; ++it) {
             if (!it->second->is_failed())
               set_sensor_value_(it->second, vals);
@@ -252,9 +252,8 @@ void IEC61107Component::loop() {
         this->set_next_state_(State::CLOSE_SESSION);
         break;
       } else {
-        auto meter_function = *req_iterator;
-        ESP_LOGD(TAG, "Requesting data for '%s'", meter_function.c_str());
-        this->prepare_request_frame_(meter_function);
+        ESP_LOGD(TAG, "Requesting data for '%s'", *req_iterator);
+        this->prepare_request_frame_(*req_iterator);
         this->send_frame_();
         this->set_next_state_delayed_(150, State::DATA_RECV);
       }
@@ -263,7 +262,7 @@ void IEC61107Component::loop() {
     case State::DATA_RECV:
       this->report_state_();
       if ((frame_size = this->receive_frame_())) {
-        ESP_LOGD(TAG, "Data received for '%s'", (*req_iterator).c_str());
+        ESP_LOGD(TAG, "Data received for '%s'", *req_iterator);
 
         if (in_bcc_ == in_buf_[frame_size - 1]) {
           ESP_LOGV(TAG, "BCC OK");
@@ -281,14 +280,15 @@ void IEC61107Component::loop() {
                  vals[1], vals[2], vals[3]);
 
         // std::string param = std::string(param_name) + "()";
-        static char param_buff[32];
-        param_buff[31] = 0;
-        snprintf(param_buff, 31, "%s()", in_buf_);
+        static const size_t param_buff_size = IEC61107SensorBase::MAX_REQUEST_SIZE + 2;
+        static char param_buff[param_buff_size]{0};
+        snprintf(param_buff, param_buff_size, "%s()", in_buf_);
+        param_buff[param_buff_size - 1] = 0;
 
         // Update all matching sensors
-        auto range = sensors_.equal_range(std::string(param_buff));
+        auto range = sensors_.equal_range(param_buff);  // std::string(param_buff));
         for (auto it = range.first; it != range.second; ++it) {
-          ESP_LOGD(TAG, "Sensor %s, idx %d", it->second->get_request().c_str(), it->second->get_index());
+          ESP_LOGD(TAG, "Sensor %s, idx %d", it->second->get_request(), it->second->get_index());
           if (!it->second->is_failed())
             set_sensor_value_(it->second, vals);
         }
@@ -298,8 +298,7 @@ void IEC61107Component::loop() {
 
     case State::DATA_FAIL:
       this->report_state_();
-      ESP_LOGW(TAG, "Data request failed. Value for '%s' not received. (Not supported ?)", (*req_iterator).c_str());
-      //(*req_iterator)->record_failure();
+      ESP_LOGW(TAG, "Data request failed. Value for '%s' not received. (Not supported ?)", *req_iterator);
       this->update_last_transmission_from_meter_timestamp_();
       this->set_next_state_(State::DATA_NEXT);
       break;
@@ -370,21 +369,20 @@ bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValuesArra
     ESP_LOGE(
         TAG,
         "Parameter %s either not supported or request is improperly formed. Sensor will be disabled after few tries.",
-        sensor->get_request().c_str());
+        sensor->get_request());
     sensor->record_failure();
     return false;
   }
 
   const char *str = vals[idx];  //.c_str();
 
-  ESP_LOGV(TAG, "Setting value for sensor '%s' to '%s', idx = %d", sensor->get_request().c_str(), str, idx + 1);
+  ESP_LOGV(TAG, "Setting value for sensor '%s' to '%s', idx = %d", sensor->get_request(), str, idx + 1);
 
   if (type == SensorType::SENSOR) {
     float f = 0;
-    //    ret = !vals[idx].empty() && char2float(str, f);
     ret = vals[idx][0] && char2float(str, f);
     if (ret) {
-      static_cast<IEC61107Sensor *>(sensor)->set_value(std::stof(str));
+      static_cast<IEC61107Sensor *>(sensor)->set_value(f);
     } else {
       ESP_LOGE(TAG, "Cannot convert incoming data to a number. Consider using a text sensor. Invalid data: '%s'", str);
     }
@@ -415,16 +413,20 @@ uint8_t checksum_7f(const uint8_t *data, size_t length) {
   return crc & 0x7f;
 }
 
-void IEC61107Component::prepare_request_frame_(const std::string &request) {
+void IEC61107Component::prepare_request_frame_(const char *request) {
   // assume request has format "XXXX(params)" if there is closing bracket
   // if not - assume it is "XXXX" and add ()
-  std::string frame = "\x01R1\x02" + request + (request.back() == ')' ? "\x03" : "()\x03");
-  memcpy(out_buf_, frame.c_str(), frame.size());
-  data_out_size_ = frame.size() + 1;
+  //  std::string frame = "\x01R1\x02" + request + (request.back() == ')' ? "\x03" : "()\x03");
+
+  auto len = strlen(request);
+  if (request[len - 1] == ')') {
+    snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "\x01R1\x02%s\x03", request);
+  } else {
+    snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "\x01R1\x02%s()\x03", request);
+    len += 2;
+  }
+  data_out_size_ = len + 6;
   uint8_t bcc = checksum_7f(out_buf_, data_out_size_);
-  out_buf_[data_out_size_ - 1] = bcc;
-  // this->reset_bcc_();
-  // this->update_bcc_(out_buf_, data_out_size_);
   out_buf_[data_out_size_ - 1] = bcc;
 }
 

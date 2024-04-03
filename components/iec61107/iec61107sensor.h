@@ -14,11 +14,16 @@ enum SensorType { SENSOR, TEXT_SENSOR };
 
 class IEC61107SensorBase {
  public:
+  static const uint8_t MAX_REQUEST_SIZE = 15;
+
   virtual SensorType get_type() const = 0;
   virtual void publish() = 0;
 
-  void set_request(const char *req) { request_ = req; };
-  const std::string &get_request() const { return request_; }
+  void set_request(const char *req) {
+    strncpy(request_, req, MAX_REQUEST_SIZE);
+    request_[MAX_REQUEST_SIZE] = '\0';
+  };
+  const char *get_request() const { return request_; }
 
   void set_index(const uint8_t idx) { idx_ = idx; };
   uint8_t get_index() const { return idx_; };
@@ -40,7 +45,7 @@ class IEC61107SensorBase {
   bool is_failed() { return tries_ == MAX_TRIES; }
 
  protected:
-  std::string request_;
+  char request_[MAX_REQUEST_SIZE + 1];
   uint8_t idx_{1};
   bool has_value_;
   uint8_t tries_{0};

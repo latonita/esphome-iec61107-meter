@@ -22,8 +22,29 @@ static const size_t MAX_OUT_BUF_SIZE = 84;
 const uint8_t VAL_NUM = 4;
 using ValuesArray = std::array<const char *, VAL_NUM>;
 using ParamName = char *;
-using SensorMap = std::unordered_multimap<std::string, IEC61107SensorBase *>;
-using RequestsSet = std::set<std::string>;
+
+struct CharPtrEqual {
+  bool operator()(const char *a, const char *b) const { return std::strcmp(a, b) == 0; }
+};
+struct CharPtrComparator {
+  bool operator()(const char *a, const char *b) const { return std::strcmp(a, b) < 0; }
+};
+struct CharPtrHash {
+  std::size_t operator()(const char *str) const {
+    std::size_t hash = 0;
+    while (*str) {
+      hash = (hash * 131) + *str;
+      ++str;
+    }
+    return hash;
+  }
+};
+
+using SensorMap = std::unordered_multimap<const char *, IEC61107SensorBase *, CharPtrHash, CharPtrEqual>;
+using RequestsSet = std::set<const char *, CharPtrComparator>;
+
+// using SensorMap = std::unordered_multimap<std::string, IEC61107SensorBase *>;
+// using RequestsSet = std::set<std::string>;
 
 class IEC61107Component : public PollingComponent, public uart::UARTDevice {
  public:
@@ -89,11 +110,11 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   void prepare_frame_(const uint8_t *data, size_t length);
   void send_frame_(const uint8_t *data, size_t length);
   void send_frame_();
-  void prepare_request_frame_(const std::string &request);
+  void prepare_request_frame_(const char *request);
   void clear_uart_input_buffer_();
 
   char *get_id_(size_t frame_size);
-//  bool parse_line_(const char *line, std::string &out_obis, std::string &out_value1, std::string &out_value2);
+  //  bool parse_line_(const char *line, std::string &out_obis, std::string &out_value1, std::string &out_value2);
   uint8_t get_values_from_brackets_(char *line, ValuesArray &vals);
   bool set_sensor_value_(IEC61107SensorBase *sensor, ValuesArray &vals);
   void update_last_transmission_from_meter_timestamp_() { last_transmission_from_meter_timestamp_ = millis(); }
