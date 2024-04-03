@@ -88,7 +88,7 @@ void IEC61107Component::loop() {
     return;
   const uint32_t now = millis();
   static uint32_t started_ms{0};
-  //uint32_t baud_rate = 4800;
+  // uint32_t baud_rate = 4800;
 
   static auto req_iterator = this->requests_.end();
   static auto sens_iterator = this->sensors_.end();
@@ -104,6 +104,8 @@ void IEC61107Component::loop() {
     }
   }
 
+  static char param_buff[32];
+  static ValuesArray vals;
   size_t frame_size;
 
   switch (this->state_) {
@@ -122,7 +124,7 @@ void IEC61107Component::loop() {
       started_ms = millis();
       this->report_state_();
       this->clear_uart_input_buffer_();
-      //iuart_->update_baudrate(300);
+      // iuart_->update_baudrate(300);
       this->send_frame_(CMD_OPEN_SESSION, sizeof(CMD_OPEN_SESSION));
       this->set_next_state_(State::OPEN_SESSION_GET_ID);
       req_iterator = this->requests_.begin();
@@ -161,8 +163,8 @@ void IEC61107Component::loop() {
           return;
         }
         this->prepare_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
-        this->out_buf_[2] = '5'; //4800 // this->baud_rate_identification_;
-        this->out_buf_[3] = '1';//this->readout_mode_ ? '0' : '1';
+        this->out_buf_[2] = '5';  // 9600 // this->baud_rate_identification_;
+        this->out_buf_[3] = '1';  // this->readout_mode_ ? '0' : '1';
         this->send_frame_();
 
         this->set_next_state_delayed_(WAIT_BETWEEN_REQUESTS_MS, State::SET_BAUD_RATE);
@@ -171,8 +173,8 @@ void IEC61107Component::loop() {
 
     case State::SET_BAUD_RATE:
       // baud_rate = identification_to_baud_rate_(this->baud_rate_identification_);
-      //  ESP_LOGV(TAG, "Baudrate set to: %u bps", baud_rate);
-      //  iuart_->update_baudrate(baud_rate);
+      // ESP_LOGV(TAG, "Baudrate set to: %u bps", baud_rate);
+      // iuart_->update_baudrate(baud_rate);
 
       this->set_next_state_(this->readout_mode_ ? State::READOUT : State::ACK_START_GET_INFO);
       break;
@@ -180,10 +182,7 @@ void IEC61107Component::loop() {
     case State::ACK_START_GET_INFO:
       this->report_state_();
       if ((frame_size = this->receive_frame_())) {
-        std::string param_name;
-        ValuesArray vals;
-
-        if (!get_values_from_brackets_((const char *) in_buf_, param_name, vals)) {
+        if (!get_values_from_brackets_((char *) in_buf_, vals)) {
           ESP_LOGE(TAG, "Invalid frame format: '%s'", in_buf_);
           break;
         }
@@ -222,20 +221,19 @@ void IEC61107Component::loop() {
 
           ESP_LOGD(TAG, "Data received: '%s' (%d)", in_buf_, frame_size);
 
-          std::string param_name;
-          ValuesArray vals;
-
-          if (!get_values_from_brackets_((const char *) in_buf_, param_name, vals)) {
+          if (!get_values_from_brackets_((char *) in_buf_, vals)) {
             ESP_LOGE(TAG, "Invalid frame format: '%s'", in_buf_);
             break;
           }
 
           // ESP_LOGD(TAG, "Data received: param '%s', value1 '%s', value2 '%s', value3 '%s', value4 '%s'",
           //          param_name.c_str(), vals[0].c_str(), vals[1].c_str(), vals[2].c_str(), vals[3].c_str());
-          std::string param = std::string(param_name) + "()";
+          //          std::string param = std::string(param_name) + "()";
+          param_buff[31] = 0;
+          snprintf(param_buff, 31, "%s()", in_buf_);
 
           // Update all matching sensors
-          auto range = sensors_.equal_range(param);
+          auto range = sensors_.equal_range(std::string(param_buff));
           for (auto it = range.first; it != range.second; ++it) {
             if (!it->second->is_failed())
               set_sensor_value_(it->second, vals);
@@ -255,16 +253,10 @@ void IEC61107Component::loop() {
         break;
       } else {
         auto meter_function = *req_iterator;
-        // if (sensor->is_failed()) {
-        //   ESP_LOGW(TAG, "Skipping request for '%s', idx=%d - too many failures", sensor->get_request().c_str(),
-        //            sensor->get_index());
-        //   this->set_next_state_(State::DATA_NEXT);
-        // } else {
         ESP_LOGD(TAG, "Requesting data for '%s'", meter_function.c_str());
         this->prepare_request_frame_(meter_function);
         this->send_frame_();
         this->set_next_state_delayed_(150, State::DATA_RECV);
-        //        }
       }
       break;
 
@@ -280,20 +272,21 @@ void IEC61107Component::loop() {
           this->set_next_state_(State::DATA_NEXT);
           break;
         }
-        std::string param_name;
-        ValuesArray vals;
 
-        if (!get_values_from_brackets_((const char *) in_buf_, param_name, vals)) {
+        if (!get_values_from_brackets_((char *) in_buf_, vals)) {
           ESP_LOGE(TAG, "Invalid frame format: '%s'", in_buf_);
           break;
         }
-        ESP_LOGD(TAG, "Data received: param '%s', value1 '%s', value2 '%s', value3 '%s', value4 '%s'",
-                 param_name.c_str(), vals[0].c_str(), vals[1].c_str(), vals[2].c_str(), vals[3].c_str());
+        ESP_LOGD(TAG, "Data received: param '%s', value1 '%s', value2 '%s', value3 '%s', value4 '%s'", in_buf_, vals[0],
+                 vals[1], vals[2], vals[3]);
 
-        std::string param = std::string(param_name) + "()";
+        // std::string param = std::string(param_name) + "()";
+        static char param_buff[32];
+        param_buff[31] = 0;
+        snprintf(param_buff, 31, "%s()", in_buf_);
 
         // Update all matching sensors
-        auto range = sensors_.equal_range(param);
+        auto range = sensors_.equal_range(std::string(param_buff));
         for (auto it = range.first; it != range.second; ++it) {
           ESP_LOGD(TAG, "Sensor %s, idx %d", it->second->get_request().c_str(), it->second->get_index());
           if (!it->second->is_failed())
@@ -382,13 +375,14 @@ bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValuesArra
     return false;
   }
 
-  const char *str = vals[idx].c_str();
+  const char *str = vals[idx];  //.c_str();
 
   ESP_LOGV(TAG, "Setting value for sensor '%s' to '%s', idx = %d", sensor->get_request().c_str(), str, idx + 1);
 
   if (type == SensorType::SENSOR) {
     float f = 0;
-    ret = !vals[idx].empty() && char2float(str, f);
+    //    ret = !vals[idx].empty() && char2float(str, f);
+    ret = vals[idx][0] && char2float(str, f);
     if (ret) {
       static_cast<IEC61107Sensor *>(sensor)->set_value(std::stof(str));
     } else {
@@ -474,8 +468,7 @@ size_t IEC61107Component::receive_frame_() {
     if (millis() - while_start > max_while_ms) {
       return 0;
     }
-    
-    
+
     if (data_in_size_ < MAX_IN_BUF_SIZE) {
       p = &in_buf_[data_in_size_];
       if (!iuart_->read_one_byte(p)) {
@@ -541,10 +534,9 @@ size_t IEC61107Component::receive_frame_() {
         ESP_LOGV(TAG, "Detected STX with data before it");
         reset_bcc_();
         update_last_transmission_from_meter_timestamp_();
-        if (data_in_size_ > 2 && in_buf_[data_in_size_ -2] == 0) {
+        if (data_in_size_ > 2 && in_buf_[data_in_size_ - 2] == 0) {
           ESP_LOGV(TAG, ".. zeroes before STX. Wait for more data.");
           return 0;
-          
         }
         ret_val = data_in_size_;
         data_in_size_ = 0;
@@ -615,25 +607,32 @@ char *IEC61107Component::get_id_(size_t frame_size) {
   return nullptr;
 }
 
-uint8_t IEC61107Component::get_values_from_brackets_(const char *line, std::string &param, ValuesArray &vals) {
+uint8_t IEC61107Component::get_values_from_brackets_(char *line, ValuesArray &vals) {
   // line = "VOLTA(100.1)VOLTA(200.1)VOLTA(300.1)VOLTA(400.1)"
+  static char empty_str[] = "";
+  vals.fill(empty_str);
+  //  vals[0] = vals[1] = vals[2] = vals[3] = empty_str;
+
   uint8_t idx = 0;
   bool got_param_name{false};
-  const char *p = line;
+  char *p = line;
   while (*p && idx < VAL_NUM) {
     if (*p == '(') {
       if (!got_param_name) {
         got_param_name = true;
-        if (p != line) {
-          param.assign(std::string(line, p));
-        }
+        // if (p != line) {
+        //   param.assign(std::string(line, p));
+        // }
+        *p = 0;  // null-terminate param name
       }
-      const char *start = p + 1;
-      const char *end = strchr(start, ')');
+      char *start = p + 1;
+      char *end = strchr(start, ')');
       if (end) {
-        std::string value = std::string(start, end);
+        *end = 0;  // null-terminate value
+                   //        std::string value = std::string(start, end);
         if (idx < VAL_NUM) {
-          vals[idx++].assign(value);
+          //          vals[idx++].assign(value);
+          vals[idx++] = start;
         }
         p = end;
       }
@@ -643,42 +642,6 @@ uint8_t IEC61107Component::get_values_from_brackets_(const char *line, std::stri
   return idx;  // at least one bracket found
 }
 
-bool IEC61107Component::parse_line_(const char *line, std::string &out_param_name, std::string &out_value1,
-                                    std::string &out_value2) {
-  const char *open_bracket = nullptr;
-  const char *close_bracket = nullptr;
-  const char *open_bracket2 = nullptr;
-  const char *close_bracket2 = nullptr;
-
-  const char *p = line;
-  while (*p++) {
-    if ('(' == *p && !open_bracket) {
-      open_bracket = p;
-    } else if (')' == *p && !close_bracket) {
-      close_bracket = p;
-    } else if ('(' == *p && !open_bracket2) {
-      open_bracket2 = p;
-    } else if (')' == *p && !close_bracket2) {
-      close_bracket2 = p;
-    }
-  }
-
-  if (!open_bracket || !close_bracket || close_bracket < open_bracket) {
-    return false;
-  }
-
-  out_param_name.assign(line, open_bracket - line);
-  out_value1.assign(open_bracket + 1, close_bracket - open_bracket - 1);
-
-  if (!(!open_bracket2 || !close_bracket2 || close_bracket2 < open_bracket2)) {
-    out_value2.assign(open_bracket2 + 1, close_bracket2 - open_bracket2 - 1);
-  } else {
-    out_value2.erase();
-  }
-
-  return true;
-}
-
 void IEC61107Component::reset_bcc_() { this->bcc_ = 0; }
 
 void IEC61107Component::update_bcc_(const uint8_t *data, size_t size) {
@@ -686,7 +649,7 @@ void IEC61107Component::update_bcc_(const uint8_t *data, size_t size) {
     this->bcc_ = (this->bcc_ + data[i]) & 0x7f;
     //    this->bcc_ += data[i];
   }
-//  this->bcc_ &= 0x7f;
+  //  this->bcc_ &= 0x7f;
 }
 
 void IEC61107Component::report_state_() {

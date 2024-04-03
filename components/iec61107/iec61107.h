@@ -20,7 +20,8 @@ static const size_t MAX_IN_BUF_SIZE = 256;
 static const size_t MAX_OUT_BUF_SIZE = 84;
 
 const uint8_t VAL_NUM = 4;
-using ValuesArray = std::array<std::string, VAL_NUM>;
+using ValuesArray = std::array<const char *, VAL_NUM>;
+using ParamName = char *;
 using SensorMap = std::unordered_multimap<std::string, IEC61107SensorBase *>;
 using RequestsSet = std::set<std::string>;
 
@@ -92,8 +93,8 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   void clear_uart_input_buffer_();
 
   char *get_id_(size_t frame_size);
-  bool parse_line_(const char *line, std::string &out_obis, std::string &out_value1, std::string &out_value2);
-  uint8_t get_values_from_brackets_(const char *line, std::string &param, ValuesArray &vals);
+//  bool parse_line_(const char *line, std::string &out_obis, std::string &out_value1, std::string &out_value2);
+  uint8_t get_values_from_brackets_(char *line, ValuesArray &vals);
   bool set_sensor_value_(IEC61107SensorBase *sensor, ValuesArray &vals);
   void update_last_transmission_from_meter_timestamp_() { last_transmission_from_meter_timestamp_ = millis(); }
   void reset_bcc_();
