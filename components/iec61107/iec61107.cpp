@@ -81,6 +81,9 @@ void IEC61107Component::abort_mission_() {
   ESP_LOGD(TAG, "Closing session");
   this->send_frame_(CMD_CLOSE_SESSION, sizeof(CMD_CLOSE_SESSION));
   this->set_next_state_(State::IDLE);
+  if (this->indicator_ != nullptr) {
+    this->indicator_->publish_state(true);
+  }
 }
 
 void IEC61107Component::loop() {
@@ -332,6 +335,10 @@ void IEC61107Component::loop() {
       } else {
         ESP_LOGD(TAG, "Data collection and publishing finished.");
         ESP_LOGD(TAG, "Total time: %u ms", millis() - started_ms);
+
+        if (this->indicator_ != nullptr) {
+          this->indicator_->publish_state(false);
+        }
         this->set_next_state_(State::IDLE);
       }
       break;

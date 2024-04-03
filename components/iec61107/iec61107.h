@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
 
 #include <cstdint>
 #include <string>
@@ -60,6 +61,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   void set_enable_readout(bool readout_mode) { this->readout_mode_ = readout_mode; };
 
   void register_sensor(IEC61107SensorBase *sensor);
+  void set_indicator(binary_sensor::BinarySensor *indicator) { this->indicator_ = indicator; }
 
  protected:
   uint32_t receive_timeout_ms_{3000};
@@ -68,6 +70,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   SensorMap sensors_;
   RequestsSet requests_;
   bool readout_mode_{false};
+  binary_sensor::BinarySensor *indicator_{};
 
   enum class State : uint8_t {
     NOT_INITIALIZED,

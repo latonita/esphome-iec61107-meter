@@ -1,17 +1,19 @@
 from esphome import pins
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import uart
+from esphome.components import uart, binary_sensor
 from esphome.const import (
     CONF_ID,
     CONF_RECEIVE_TIMEOUT,
     CONF_UPDATE_INTERVAL,
     CONF_FLOW_CONTROL_PIN,
+    DEVICE_CLASS_PROBLEM,
+    ENTITY_CATEGORY_DIAGNOSTIC,
 )
 
 CODEOWNERS = ["@latonita"]
 
-AUTO_LOAD = ["sensor"]
+AUTO_LOAD = ["sensor", "binary_sensor"]
 
 DEPENDENCIES = ["uart"]
 
@@ -20,6 +22,7 @@ MAX_SENSOR_INDEX = 12
 CONF_IEC61107_ID = "iec61107_id"
 CONF_REQUEST = "request"
 CONF_READOUT_ENABLED = "readout_enabled"
+CONF_INDICATOR = "indicator"
 
 iec61107_ns = cg.esphome_ns.namespace("iec61107")
 IEC61107Component = iec61107_ns.class_(
@@ -43,6 +46,10 @@ CONFIG_SCHEMA = cv.All(
             ): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): cv.update_interval,
             cv.Optional(CONF_READOUT_ENABLED, default=False): cv.boolean,
+            cv.Optional(CONF_INDICATOR): binary_sensor.binary_sensor_schema(
+                device_class=DEVICE_CLASS_PROBLEM,
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            ),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -58,6 +65,12 @@ async def to_code(config):
     if CONF_FLOW_CONTROL_PIN in config:
         pin = await cg.gpio_pin_expression(config[CONF_FLOW_CONTROL_PIN])
         cg.add(var.set_flow_control_pin(pin))
+
+    if CONF_INDICATOR in config:
+        conf = config[CONF_INDICATOR]
+        sens = cg.new_Pvariable(conf[CONF_ID])
+        await binary_sensor.register_binary_sensor(sens, conf)
+        cg.add(var.set_indicator(sens))
 
     cg.add(var.set_receive_timeout_ms(config[CONF_RECEIVE_TIMEOUT]))
     cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
