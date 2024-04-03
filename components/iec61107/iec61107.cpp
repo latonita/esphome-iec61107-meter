@@ -95,14 +95,16 @@ void IEC61107Component::report_failure(bool set_or_clear) {
       ESP_LOGE(TAG, "Too many failures. Let's try rebooting device.");
       delay(100);
       App.safe_reboot();
+    } else {
+      ESP_LOGE(TAG, "Failed reading from meter. Let's try reloading UART.");
+      this->iuart_->load_settings();
+      delay(100);
     }
   } else {
     number_of_failures_ = 0;
     if (this->indicator_ != nullptr) {
       this->indicator_->publish_state(false);
     }
-    this->iuart_->load_settings();
-    delay(100);
   }
 }
 
