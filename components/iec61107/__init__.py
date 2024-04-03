@@ -7,7 +7,6 @@ from esphome.const import (
     CONF_RECEIVE_TIMEOUT,
     CONF_UPDATE_INTERVAL,
     CONF_FLOW_CONTROL_PIN,
-    #    CONF_INDEX,
 )
 
 CODEOWNERS = ["@latonita"]
@@ -15,6 +14,8 @@ CODEOWNERS = ["@latonita"]
 AUTO_LOAD = ["sensor"]
 
 DEPENDENCIES = ["uart"]
+
+MAX_SENSOR_INDEX = 12
 
 CONF_IEC61107_ID = "iec61107_id"
 CONF_REQUEST = "request"
@@ -27,7 +28,8 @@ IEC61107Component = iec61107_ns.class_(
 
 
 def validate_request_format(value):
-    # tbd
+    if len(value) > 15:
+        raise cv.Invalid("Request length must be no longer than 15 characters")
     return value
 
 
@@ -53,15 +55,10 @@ async def to_code(config):
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
 
-    if CONF_UPDATE_INTERVAL in config:
-        cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
-
-    if CONF_RECEIVE_TIMEOUT in config:
-        cg.add(var.set_receive_timeout_ms(config[CONF_RECEIVE_TIMEOUT]))
-
     if CONF_FLOW_CONTROL_PIN in config:
         pin = await cg.gpio_pin_expression(config[CONF_FLOW_CONTROL_PIN])
         cg.add(var.set_flow_control_pin(pin))
 
-    # if CONF_READOUT_ENABLED in config:
+    cg.add(var.set_receive_timeout_ms(config[CONF_RECEIVE_TIMEOUT]))
+    cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
     #     cg.add(var.set_enable_readout(config[CONF_READOUT_ENABLED]))

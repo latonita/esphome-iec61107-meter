@@ -69,24 +69,21 @@ class IEC61107Sensor : public IEC61107SensorBase, public sensor::Sensor {
 #ifdef USE_TEXT_SENSOR
 class IEC61107TextSensor : public IEC61107SensorBase, public text_sensor::TextSensor {
  public:
+  static const uint8_t MAX_TEXT_SIZE = 63;
   SensorType get_type() const override { return TEXT_SENSOR; }
   void publish() override { publish_state(value_); }
 
   void set_value(const char *value) {
-    value_ = value;
+    strncpy(value_, value, MAX_TEXT_SIZE);
+    request_[MAX_TEXT_SIZE] = '\0';
+    //    value_ = value;
     has_value_ = true;
     tries_ = 0;
   }
 
-  //   void set_group(int group) { group_ = group % 3; }
-
-  //   uint8_t get_group() { return group_; }
-
  protected:
-  std::string value_;
-  //   // 0 - entire frame, 1 value from the first () group, 2 value from the second () group
-  //   // 1-0:1.6.0(00000001000.000*kW)(2000-10-01 00:00:00)
-  //   uint8_t group_;
+  //  std::string value_;
+  char value_[MAX_TEXT_SIZE + 1]{0};
 };
 #endif
 

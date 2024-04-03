@@ -10,6 +10,7 @@ from . import (
     iec61107_ns,
     CONF_REQUEST,
     validate_request_format,
+    MAX_SENSOR_INDEX,
 )
 
 IEC61107Sensor = iec61107_ns.class_("IEC61107Sensor", sensor.Sensor)
@@ -22,7 +23,9 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(CONF_IEC61107_ID): cv.use_id(IEC61107Component),
             cv.Required(CONF_REQUEST): validate_request_format,
-            cv.Optional(CONF_INDEX, default=1): cv.int_range(min=1, max=12),
+            cv.Optional(CONF_INDEX, default=1): cv.int_range(
+                min=1, max=MAX_SENSOR_INDEX
+            ),
         }
     ),
     cv.has_exactly_one_key(CONF_REQUEST),
@@ -37,4 +40,5 @@ async def to_code(config):
         cg.add(var.set_request(config[CONF_REQUEST]))
 
     cg.add(var.set_index(config[CONF_INDEX]))
+
     cg.add(component.register_sensor(var))

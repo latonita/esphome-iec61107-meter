@@ -366,10 +366,10 @@ bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValuesArra
     return false;
   }
   if (vals[idx][0] == 'E' && vals[idx][1] == 'R' && vals[idx][2] == 'R') {
-    ESP_LOGE(
-        TAG,
-        "Parameter %s either not supported or request is improperly formed. Sensor will be disabled after few tries.",
-        sensor->get_request());
+    ESP_LOGE(TAG,
+             "Parameter %s either not supported or request is improperly formed. Sensor will be disabled after few "
+             "tries. %s",
+             sensor->get_request(), vals[idx]);
     sensor->record_failure();
     return false;
   }

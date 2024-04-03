@@ -7,7 +7,6 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
-#include <list>
 #include <set>
 
 #include "iec61107uart.h"
@@ -114,13 +113,15 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   void clear_uart_input_buffer_();
 
   char *get_id_(size_t frame_size);
-  //  bool parse_line_(const char *line, std::string &out_obis, std::string &out_value1, std::string &out_value2);
+  
   uint8_t get_values_from_brackets_(char *line, ValuesArray &vals);
   bool set_sensor_value_(IEC61107SensorBase *sensor, ValuesArray &vals);
   void update_last_transmission_from_meter_timestamp_() { last_transmission_from_meter_timestamp_ = millis(); }
   void reset_bcc_();
   void update_bcc_(const uint8_t *data, size_t size);
+  
   void report_state_();
+  
   uint32_t identification_to_baud_rate_(char z);
   char baud_rate_to_identification_(uint32_t baud_rate);
 
