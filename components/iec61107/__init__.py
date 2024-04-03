@@ -23,6 +23,7 @@ CONF_IEC61107_ID = "iec61107_id"
 CONF_REQUEST = "request"
 CONF_READOUT_ENABLED = "readout_enabled"
 CONF_INDICATOR = "indicator"
+CONF_REBOOT_AFTER_FAILURE = "reboot_after_failure"
 
 iec61107_ns = cg.esphome_ns.namespace("iec61107")
 IEC61107Component = iec61107_ns.class_(
@@ -46,6 +47,9 @@ CONFIG_SCHEMA = cv.All(
             ): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): cv.update_interval,
             cv.Optional(CONF_READOUT_ENABLED, default=False): cv.boolean,
+            cv.Optional(CONF_REBOOT_AFTER_FAILURE, default=0): cv.int_range(
+                min=0, max=100
+            ),
             cv.Optional(CONF_INDICATOR): binary_sensor.binary_sensor_schema(
                 device_class=DEVICE_CLASS_PROBLEM,
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
@@ -74,4 +78,5 @@ async def to_code(config):
 
     cg.add(var.set_receive_timeout_ms(config[CONF_RECEIVE_TIMEOUT]))
     cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
+    cg.add(var.set_reboot_after_failure(config[CONF_REBOOT_AFTER_FAILURE]))
     #     cg.add(var.set_enable_readout(config[CONF_READOUT_ENABLED]))

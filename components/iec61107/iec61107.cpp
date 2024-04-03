@@ -91,8 +91,8 @@ void IEC61107Component::report_failure(bool set_or_clear) {
     }
 
     number_of_failures_++;
-    if (number_of_failures_ > 5) {
-      ESP_LOGE(TAG, "Too many failures. Esp8266 software serial issue? Let's try rebooting device.");
+    if (number_of_failures_ > this->number_of_failures_before_reboot_ && this->number_of_failures_before_reboot_ != 0) {
+      ESP_LOGE(TAG, "Too many failures. Let's try rebooting device.");
       delay(100);
       App.safe_reboot();
     }
@@ -477,7 +477,6 @@ void IEC61107Component::send_frame_(const uint8_t *data, size_t length) {
 
 size_t IEC61107Component::receive_frame_() {
   App.feed_wdt();
-
   const uint32_t max_while_ms = 25;
   size_t ret_val;
   auto count = this->available();

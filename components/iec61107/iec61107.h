@@ -62,6 +62,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
 
   void register_sensor(IEC61107SensorBase *sensor);
   void set_indicator(binary_sensor::BinarySensor *indicator) { this->indicator_ = indicator; }
+  void set_reboot_after_failure(uint16_t number_of_failures) { number_of_failures_before_reboot_ = number_of_failures; }
 
  protected:
   uint32_t receive_timeout_ms_{3000};
@@ -96,6 +97,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
 
   void report_failure(bool set_or_clear);
   uint8_t number_of_failures_{0};
+  uint8_t number_of_failures_before_reboot_{0};
 
   uint32_t last_transmission_from_meter_timestamp_;
   uint32_t wait_start_timestamp_;
