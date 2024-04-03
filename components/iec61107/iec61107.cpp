@@ -101,6 +101,8 @@ void IEC61107Component::report_failure(bool set_or_clear) {
     if (this->indicator_ != nullptr) {
       this->indicator_->publish_state(false);
     }
+    this->iuart_->load_settings();
+    delay(100);
   }
 }
 
