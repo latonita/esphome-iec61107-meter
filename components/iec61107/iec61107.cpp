@@ -81,8 +81,26 @@ void IEC61107Component::abort_mission_() {
   ESP_LOGD(TAG, "Closing session");
   this->send_frame_(CMD_CLOSE_SESSION, sizeof(CMD_CLOSE_SESSION));
   this->set_next_state_(State::IDLE);
-  if (this->indicator_ != nullptr) {
-    this->indicator_->publish_state(true);
+  this->report_failure(true);
+}
+
+void IEC61107Component::report_failure(bool set_or_clear) {
+  if (set_or_clear) {
+    if (this->indicator_ != nullptr) {
+      this->indicator_->publish_state(true);
+    }
+
+    number_of_failures_++;
+    if (number_of_failures_ > 5) {
+      ESP_LOGE(TAG, "Too many failures. Esp8266 software serial issue? Let's try rebooting device.");
+      delay(100);
+      App.safe_reboot();
+    }
+  } else {
+    number_of_failures_ = 0;
+    if (this->indicator_ != nullptr) {
+      this->indicator_->publish_state(false);
+    }
   }
 }
 
@@ -336,9 +354,7 @@ void IEC61107Component::loop() {
         ESP_LOGD(TAG, "Data collection and publishing finished.");
         ESP_LOGD(TAG, "Total time: %u ms", millis() - started_ms);
 
-        if (this->indicator_ != nullptr) {
-          this->indicator_->publish_state(false);
-        }
+        this->report_failure(false);
         this->set_next_state_(State::IDLE);
       }
       break;

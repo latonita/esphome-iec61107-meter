@@ -94,6 +94,9 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   bool check_wait_period_() { return millis() - wait_start_timestamp_ >= wait_period_ms_; }
   bool is_idling() const { return this->state_ == State::WAIT || this->state_ == State::IDLE; };
 
+  void report_failure(bool set_or_clear);
+  uint8_t number_of_failures_{0};
+
   uint32_t last_transmission_from_meter_timestamp_;
   uint32_t wait_start_timestamp_;
   uint32_t wait_period_ms_;
