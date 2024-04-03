@@ -476,6 +476,8 @@ void IEC61107Component::send_frame_(const uint8_t *data, size_t length) {
 }
 
 size_t IEC61107Component::receive_frame_() {
+  App.feed_wdt();
+
   const uint32_t max_while_ms = 25;
   size_t ret_val;
   auto count = this->available();
@@ -502,6 +504,8 @@ size_t IEC61107Component::receive_frame_() {
       if (etx_detected && *p == 0) {
         // skip zeroes after ETX
         ESP_LOGV(TAG, "Skipping zeroes after ETX");
+        yield();
+        App.feed_wdt();
         continue;
       }
       data_in_size_++;
@@ -587,6 +591,8 @@ size_t IEC61107Component::receive_frame_() {
       data_in_size_ = 0;
       return ret_val;
     }
+    yield();
+    App.feed_wdt();
   }
   return 0;
 }
