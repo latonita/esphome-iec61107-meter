@@ -24,7 +24,6 @@ static const uint8_t CMD_ACK_SET_BAUD_AND_MODE[] = {ACK, '0', '5',
 static const uint8_t CMD_CLOSE_SESSION[] = {SOH, 0x42, 0x30, ETX, 0x75};
 
 static constexpr uint8_t BOOT_WAIT_S = 10;
-static constexpr uint32_t WAIT_BETWEEN_REQUESTS_MS = 350;
 
 enum ProtocolMode { PROTOCOL_MODE_A = 'A', PROTOCOL_MODE_B = 'B', PROTOCOL_MODE_C = 'C', PROTOCOL_MODE_D = 'D' };
 const uint32_t BAUDRATES[] = {300, 600, 1200, 2400, 4800, 9600, 19200};
@@ -192,7 +191,8 @@ void IEC61107Component::loop() {
         this->out_buf_[3] = '1';  // this->readout_mode_ ? '0' : '1';
         this->send_frame_();
 
-        this->set_next_state_delayed_(WAIT_BETWEEN_REQUESTS_MS, State::SET_BAUD_RATE);
+//        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::SET_BAUD_RATE);
+        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::ACK_START_GET_INFO);
       }
       break;
 
@@ -212,7 +212,7 @@ void IEC61107Component::loop() {
           break;
         }
 
-        this->set_next_state_delayed_(WAIT_BETWEEN_REQUESTS_MS, State::DATA_ENQ);
+        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_ENQ);
       }
       break;
 
@@ -280,7 +280,7 @@ void IEC61107Component::loop() {
         ESP_LOGD(TAG, "Requesting data for '%s'", *req_iterator);
         this->prepare_request_frame_(*req_iterator);
         this->send_frame_();
-        this->set_next_state_delayed_(150, State::DATA_RECV);
+        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_RECV);
       }
       break;
 
@@ -310,12 +310,14 @@ void IEC61107Component::loop() {
         snprintf(param_buff, param_buff_size, "%s()", in_buf_);
         param_buff[param_buff_size - 1] = 0;
 
-        // Update all matching sensors
-        auto range = sensors_.equal_range(param_buff);  // std::string(param_buff));
-        for (auto it = range.first; it != range.second; ++it) {
-          ESP_LOGD(TAG, "Sensor %s, idx %d", it->second->get_request(), it->second->get_index());
-          if (!it->second->is_failed())
-            set_sensor_value_(it->second, vals);
+        if (param_buff[0]) {
+          // Update all matching sensors
+          auto range = sensors_.equal_range(param_buff);  // std::string(param_buff));
+          for (auto it = range.first; it != range.second; ++it) {
+            ESP_LOGD(TAG, "Sensor %s, idx %d", it->second->get_request(), it->second->get_index());
+            if (!it->second->is_failed())
+              set_sensor_value_(it->second, vals);
+          }
         }
         this->set_next_state_(State::DATA_NEXT);
       }
@@ -332,9 +334,9 @@ void IEC61107Component::loop() {
       this->report_state_();
       req_iterator++;
       if (req_iterator != this->requests_.end()) {
-        this->set_next_state_delayed_(WAIT_BETWEEN_REQUESTS_MS, State::DATA_ENQ);
+        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_ENQ);
       } else {
-        this->set_next_state_delayed_(WAIT_BETWEEN_REQUESTS_MS, State::CLOSE_SESSION);
+        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::CLOSE_SESSION);
       }
       break;
     case State::CLOSE_SESSION:
@@ -563,16 +565,21 @@ size_t IEC61107Component::receive_frame_() {
           data_in_size_ = 0;  /////////////////////////////////////////////////////////// test
           return 0;
         }
+
+        //todo: check its not part of transmission....
         ESP_LOGV(TAG, "Detected STX with data before it");
-        reset_bcc_();
-        update_last_transmission_from_meter_timestamp_();
         if (data_in_size_ > 2 && in_buf_[data_in_size_ - 2] == 0) {
+          reset_bcc_();
+          update_last_transmission_from_meter_timestamp_();
           ESP_LOGV(TAG, ".. zeroes before STX. Wait for more data.");
           return 0;
         }
-        ret_val = data_in_size_;
-        data_in_size_ = 0;
-        return ret_val;
+        ESP_LOGV(TAG, "STX with data before it. Should not be like that... Let's wait for more data");
+        return 0;
+
+        // ret_val = data_in_size_;
+        // data_in_size_ = 0;
+        // return ret_val;
       }
     }
     bool crlfdata_out = !stx_detected || this->readout_mode_;

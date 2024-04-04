@@ -57,6 +57,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   float get_setup_priority() const override { return setup_priority::DATA; };
 
   void set_receive_timeout_ms(uint32_t timeout) { this->receive_timeout_ms_ = timeout; };
+  void set_delay_between_requests_ms(uint32_t delay) { this->delay_between_requests_ms_ = delay; };
   void set_flow_control_pin(GPIOPin *flow_control_pin) { this->flow_control_pin_ = flow_control_pin; };
   void set_enable_readout(bool readout_mode) { this->readout_mode_ = readout_mode; };
 
@@ -65,7 +66,9 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   void set_reboot_after_failure(uint16_t number_of_failures) { number_of_failures_before_reboot_ = number_of_failures; }
 
  protected:
-  uint32_t receive_timeout_ms_{3000};
+  uint32_t receive_timeout_ms_{750};
+  uint32_t delay_between_requests_ms_{350};
+
   GPIOPin *flow_control_pin_{nullptr};
   std::unique_ptr<IEC61107UART> iuart_;
   SensorMap sensors_;

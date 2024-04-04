@@ -21,6 +21,8 @@ MAX_SENSOR_INDEX = 12
 
 CONF_IEC61107_ID = "iec61107_id"
 CONF_REQUEST = "request"
+CONF_DELAY_BETWEEN_REQUESTS = "delay_between_requests"
+
 CONF_READOUT_ENABLED = "readout_enabled"
 CONF_INDICATOR = "indicator"
 CONF_REBOOT_AFTER_FAILURE = "reboot_after_failure"
@@ -44,6 +46,9 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
             cv.Optional(
                 CONF_RECEIVE_TIMEOUT, default="500ms"
+            ): cv.positive_time_period_milliseconds,
+            cv.Optional(
+                CONF_DELAY_BETWEEN_REQUESTS, default="350ms"
             ): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): cv.update_interval,
             cv.Optional(CONF_READOUT_ENABLED, default=False): cv.boolean,
@@ -77,6 +82,7 @@ async def to_code(config):
         cg.add(var.set_indicator(sens))
 
     cg.add(var.set_receive_timeout_ms(config[CONF_RECEIVE_TIMEOUT]))
+    cg.add(var.set_delay_between_requests_ms(config[CONF_DELAY_BETWEEN_REQUESTS]))
     cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
     cg.add(var.set_reboot_after_failure(config[CONF_REBOOT_AFTER_FAILURE]))
     #     cg.add(var.set_enable_readout(config[CONF_READOUT_ENABLED]))
