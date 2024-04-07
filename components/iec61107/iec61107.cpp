@@ -48,6 +48,9 @@ void IEC61107Component::setup() {
   iuart_ = make_unique<IEC61107UART>(*static_cast<uart::ESP8266UartComponent *>(this->parent_));
 #endif
   this->clear_uart_input_buffer_();
+  if (this->flow_control_pin_ != nullptr) {
+    this->flow_control_pin_->setup();
+  }
 
   this->set_timeout(BOOT_WAIT_S * 1000, [this]() {
     ESP_LOGD(TAG, "Boot timeout, component is ready to use");
@@ -94,10 +97,6 @@ void IEC61107Component::report_failure(bool set_or_clear) {
       ESP_LOGE(TAG, "Too many failures. Let's try rebooting device.");
       delay(100);
       App.safe_reboot();
-    // } else {
-    //   ESP_LOGE(TAG, "Failed reading from meter. Let's try reloading UART.");
-    //   this->iuart_->load_settings();
-    //   delay(100);
     }
   } else {
     number_of_failures_ = 0;
@@ -191,8 +190,7 @@ void IEC61107Component::loop() {
         this->out_buf_[3] = '1';  // this->readout_mode_ ? '0' : '1';
         this->send_frame_();
 
-//        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::SET_BAUD_RATE);
-        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::ACK_START_GET_INFO);
+        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::ACK_START_GET_INFO);  // SET_BAUD_RATE
       }
       break;
 
@@ -423,14 +421,6 @@ bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValuesArra
   return ret;
 }
 
-void IEC61107Component::set_next_state_delayed_(uint32_t ms, State next_state) {
-  ESP_LOGD(TAG, "Short delay before next step for %u ms", ms);
-  set_next_state_(State::WAIT);
-  wait_start_timestamp_ = millis();
-  wait_period_ms_ = ms;
-  next_state_after_wait_ = next_state;
-}
-
 uint8_t checksum_7f(const uint8_t *data, size_t length) {
   uint8_t crc = 0;
   if (length < 2) {
@@ -440,6 +430,14 @@ uint8_t checksum_7f(const uint8_t *data, size_t length) {
     crc += data[i];
   }
   return crc & 0x7f;
+}
+
+void IEC61107Component::set_next_state_delayed_(uint32_t ms, State next_state) {
+  ESP_LOGD(TAG, "Short delay before next step for %u ms", ms);
+  set_next_state_(State::WAIT);
+  wait_start_timestamp_ = millis();
+  wait_period_ms_ = ms;
+  next_state_after_wait_ = next_state;
 }
 
 void IEC61107Component::prepare_request_frame_(const char *request) {
@@ -566,7 +564,7 @@ size_t IEC61107Component::receive_frame_() {
           return 0;
         }
 
-        //todo: check its not part of transmission....
+        // todo: check its not part of transmission....
         ESP_LOGV(TAG, "Detected STX with data before it");
         if (data_in_size_ > 2 && in_buf_[data_in_size_ - 2] == 0) {
           reset_bcc_();
