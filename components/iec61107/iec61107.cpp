@@ -2,6 +2,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/application.h"
 #include "iec61107.h"
+#include <sstream>
 
 namespace esphome {
 namespace iec61107 {
@@ -23,6 +24,61 @@ static const uint8_t CMD_ACK_SET_BAUD_AND_MODE[] = {ACK, '0', '5', '1', CR, LF};
 static const uint8_t CMD_CLOSE_SESSION[] = {SOH, 0x42, 0x30, ETX, 0x75};
 
 static constexpr uint8_t BOOT_WAIT_S = 10;
+
+static char format_hex_char(uint8_t v) { return v >= 10 ? 'A' + (v - 10) : '0' + v; }
+
+static std::string format_frame_pretty(const uint8_t *data, size_t length) {
+  if (length == 0)
+    return "";
+  std::string ret;
+  ret.resize(3 * length - 1);
+  std::ostringstream ss(ret);
+
+  for (size_t i = 0; i < length; i++) {
+    switch (data[i]) {
+      case 0x00:
+        ss << "<NUL>";
+        break;
+      case 0x01:
+        ss << "<SOH>";
+        break;
+      case 0x02:
+        ss << "<STX>";
+        break;
+      case 0x03:
+        ss << "<ETX>";
+        break;
+      case 0x04:
+        ss << "<EOT>";
+        break;
+      case 0x05:
+        ss << "<ENQ>";
+        break;
+      case 0x06:
+        ss << "<ACK>";
+        break;
+      case 0x0d:
+        ss << "<CR>";
+        break;
+      case 0x0a:
+        ss << "<LF>";
+        break;
+      case 0x15:
+        ss << "<NAK>";
+        break;
+      default:
+        if (data[i] < 0x20 || data[i] >= 0x7f) {
+          ss << "<" << format_hex_char((data[i] & 0xF0) >> 4) << format_hex_char(data[i] & 0x0F) << ">";
+        } else {
+          ss << (char) data[i];
+        }
+        break;
+    }
+  }
+  if (length > 4)
+    ss << " (" << length << ")";
+  return ss.str();
+}
 
 void IEC61107Component::setup() {
   ESP_LOGD(TAG, "setup");
@@ -164,6 +220,8 @@ void IEC61107Component::loop() {
         this->abort_mission_();
         return;
       }
+
+      ESP_LOGD(TAG, "Meter address: %s", vals[0]);
 
       this->set_next_state_(State::DATA_ENQ);
       break;
@@ -373,7 +431,8 @@ void IEC61107Component::send_frame_prepared_() {
   if (this->flow_control_pin_ != nullptr)
     this->flow_control_pin_->digital_write(false);
 
-  ESP_LOGV(TAG, "TX: %s", format_hex_pretty(out_buf_, data_out_size_).c_str());
+  ESP_LOGV(TAG, "TX: %s", format_frame_pretty(out_buf_, data_out_size_).c_str());
+  ESP_LOGVV(TAG, "TX: %s", format_hex_pretty(out_buf_, data_out_size_).c_str());
 }
 
 void IEC61107Component::prepare_frame_(const uint8_t *data, size_t length) {
@@ -416,7 +475,8 @@ size_t IEC61107Component::receive_frame_(FrameStopFunction stop_fn) {
     }
 
     if (stop_fn(in_buf_, data_in_size_)) {
-      ESP_LOGV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
+      ESP_LOGV(TAG, "RX: %s", format_frame_pretty(in_buf_, data_in_size_).c_str());
+      ESP_LOGVV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
       ret_val = data_in_size_;
       data_in_size_ = 0;
       this->update_last_rx_time_();
