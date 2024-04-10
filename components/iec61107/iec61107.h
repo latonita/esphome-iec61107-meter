@@ -19,7 +19,7 @@ namespace iec61107 {
 static const size_t MAX_IN_BUF_SIZE = 256;
 static const size_t MAX_OUT_BUF_SIZE = 84;
 
-const uint8_t VAL_NUM = 4;
+const uint8_t VAL_NUM = 12;
 using ValuesArray = std::array<const char *, VAL_NUM>;
 using ParamName = char *;
 
@@ -54,15 +54,18 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   void update() override;
   float get_setup_priority() const override { return setup_priority::DATA; };
 
+  void set_meter_address(const std::string &addr) { this->meter_address_ = addr; };
+
   void set_receive_timeout_ms(uint32_t timeout) { this->receive_timeout_ms_ = timeout; };
   void set_delay_between_requests_ms(uint32_t delay) { this->delay_between_requests_ms_ = delay; };
   void set_flow_control_pin(GPIOPin *flow_control_pin) { this->flow_control_pin_ = flow_control_pin; };
 
   void register_sensor(IEC61107SensorBase *sensor);
   void set_indicator(binary_sensor::BinarySensor *indicator) { this->indicator_ = indicator; }
-  void set_reboot_after_failure(uint16_t number_of_failures) { number_of_failures_before_reboot_ = number_of_failures; }
+  void set_reboot_after_failure(uint16_t number_of_failures) { this->number_of_failures_before_reboot_ = number_of_failures; }
 
  protected:
+  std::string meter_address_{""};
   uint32_t receive_timeout_ms_{750};
   uint32_t delay_between_requests_ms_{350};
 

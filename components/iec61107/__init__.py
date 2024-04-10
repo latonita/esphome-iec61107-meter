@@ -4,6 +4,7 @@ import esphome.config_validation as cv
 from esphome.components import uart, binary_sensor
 from esphome.const import (
     CONF_ID,
+    CONF_ADDRESS,
     CONF_RECEIVE_TIMEOUT,
     CONF_UPDATE_INTERVAL,
     CONF_FLOW_CONTROL_PIN,
@@ -38,16 +39,25 @@ def validate_request_format(value):
     return value
 
 
+def validate_meter_address(value):
+    if len(value) > 15:
+        raise cv.Invalid("Meter address length must be no longer than 15 characters")
+    return value
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(IEC61107Component),
+            cv.Optional(CONF_ADDRESS, default=""): cv.All(
+                cv.string, validate_meter_address
+            ),
             cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
             cv.Optional(
                 CONF_RECEIVE_TIMEOUT, default="500ms"
             ): cv.positive_time_period_milliseconds,
             cv.Optional(
-                CONF_DELAY_BETWEEN_REQUESTS, default="350ms"
+                CONF_DELAY_BETWEEN_REQUESTS, default="150ms"
             ): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): cv.update_interval,
             cv.Optional(CONF_REBOOT_AFTER_FAILURE, default=0): cv.int_range(
@@ -79,6 +89,7 @@ async def to_code(config):
         await binary_sensor.register_binary_sensor(sens, conf)
         cg.add(var.set_indicator(sens))
 
+    cg.add(var.set_meter_address(config[CONF_ADDRESS]))
     cg.add(var.set_receive_timeout_ms(config[CONF_RECEIVE_TIMEOUT]))
     cg.add(var.set_delay_between_requests_ms(config[CONF_DELAY_BETWEEN_REQUESTS]))
     cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))

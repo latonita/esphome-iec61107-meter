@@ -19,7 +19,6 @@ static constexpr uint8_t CR = 0x0D;
 static constexpr uint8_t LF = 0x0A;
 static constexpr uint8_t NAK = 0x15;
 
-static const uint8_t CMD_OPEN_SESSION[] = {0x2f, 0x3f, 0x21, 0x0d, 0x0a};
 static const uint8_t CMD_ACK_SET_BAUD_AND_MODE[] = {ACK, '0', '5', '1', CR, LF};
 static const uint8_t CMD_CLOSE_SESSION[] = {SOH, 0x42, 0x30, ETX, 0x75};
 
@@ -184,14 +183,16 @@ void IEC61107Component::loop() {
       this->update_last_rx_time_();
       break;
 
-    case State::OPEN_SESSION:
+    case State::OPEN_SESSION: {
       started_ms = millis();
       this->log_state_();
       this->clear_buffers_();
-      this->send_frame_(CMD_OPEN_SESSION, sizeof(CMD_OPEN_SESSION));
+      uint8_t open_cmd[32]{0};
+      uint8_t open_cmd_len = snprintf((char *) open_cmd, 32, "/?%s!\r\n", this->meter_address_.c_str());
+      this->send_frame_(open_cmd, open_cmd_len);
       this->set_next_state_(State::OPEN_SESSION_GET_ID);
       req_iterator = this->requests_.begin();
-      break;
+    } break;
 
     case State::OPEN_SESSION_GET_ID:
       this->log_state_();
@@ -249,7 +250,7 @@ void IEC61107Component::loop() {
       else {
         this->set_next_state_(State::DATA_NEXT);
 
-        ESP_LOGD(TAG, "Data received for '%s'", *req_iterator);
+        ESP_LOGV(TAG, "Data received for '%s'", *req_iterator);
 
         uint8_t bcc = this->calculate_crc_frame_r1_(in_buf_, frame_size);
         if (bcc != in_buf_[frame_size - 1]) {
@@ -399,7 +400,7 @@ uint8_t IEC61107Component::calculate_crc_frame_r1_(const uint8_t *data, size_t l
 }
 
 void IEC61107Component::set_next_state_delayed_(uint32_t ms, State next_state) {
-  ESP_LOGD(TAG, "Short delay for %u ms", ms);
+  ESP_LOGV(TAG, "Short delay for %u ms", ms);
   set_next_state_(State::WAIT);
   wait_start_time_ = millis();
   wait_period_ms_ = ms;
