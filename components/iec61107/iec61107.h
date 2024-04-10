@@ -42,6 +42,7 @@ struct CharPtrHash {
 
 using SensorMap = std::unordered_multimap<const char *, IEC61107SensorBase *, CharPtrHash, CharPtrEqual>;
 using RequestsSet = std::set<const char *, CharPtrComparator>;
+using FrameStopFunction = std::function<bool(uint8_t *buf, size_t size)>;
 
 // using SensorMap = std::unordered_multimap<std::string, IEC61107SensorBase *>;
 // using RequestsSet = std::set<std::string>;
@@ -82,13 +83,11 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
     WAIT,
     OPEN_SESSION,
     OPEN_SESSION_GET_ID,
-    SET_BAUD_RATE,
     ACK_START_GET_INFO,
     DATA_ENQ,
     DATA_RECV,
     DATA_FAIL,
     DATA_NEXT,
-    READOUT,
     CLOSE_SESSION,
     PUBLISH,
   } state_{State::NOT_INITIALIZED}, next_state_after_wait_{State::IDLE};
@@ -116,7 +115,10 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   size_t data_out_size_;
   uint8_t bcc_;
 
-  size_t receive_frame_();
+  size_t receive_frame_(FrameStopFunction stop_fn);
+  size_t receive_frame_ascii_();
+  size_t receive_frame_r1_(uint8_t start_byte);
+
   void prepare_frame_(const uint8_t *data, size_t length);
   void send_frame_(const uint8_t *data, size_t length);
   void send_frame_();
@@ -130,7 +132,8 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   void update_last_transmission_from_meter_timestamp_() { last_transmission_from_meter_timestamp_ = millis(); }
   void reset_bcc_();
   void update_bcc_(const uint8_t *data, size_t size);
-  
+  uint8_t r1_frame_crc(const uint8_t *data, size_t length);
+
   void report_state_();
   
   uint32_t identification_to_baud_rate_(char z);
