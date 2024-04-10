@@ -19,20 +19,10 @@ static constexpr uint8_t LF = 0x0A;
 static constexpr uint8_t NAK = 0x15;
 
 static const uint8_t CMD_OPEN_SESSION[] = {0x2f, 0x3f, 0x21, 0x0d, 0x0a};
-static const uint8_t CMD_ACK_SET_BAUD_AND_MODE[] = {ACK, '0', '5',
-                                                    '1', CR,  LF};  // [2] = 5 = 9600, [3] 1 = one-by-one, 0 - readout
+static const uint8_t CMD_ACK_SET_BAUD_AND_MODE[] = {ACK, '0', '5', '1', CR, LF};
 static const uint8_t CMD_CLOSE_SESSION[] = {SOH, 0x42, 0x30, ETX, 0x75};
 
 static constexpr uint8_t BOOT_WAIT_S = 10;
-
-enum ProtocolMode { PROTOCOL_MODE_A = 'A', PROTOCOL_MODE_B = 'B', PROTOCOL_MODE_C = 'C', PROTOCOL_MODE_D = 'D' };
-const uint32_t BAUDRATES[] = {300, 600, 1200, 2400, 4800, 9600, 19200};
-#define MAX_BAUDRATE (BAUDRATES[sizeof(BAUDRATES) / sizeof(uint32_t) - 1])
-#define PROTO_B_MIN_BAUDRATE (BAUDRATES[1])
-static const char PROTO_B_RANGE_BEGIN = 'A';
-static const char PROTO_B_RANGE_END = 'F';
-static const char PROTO_C_RANGE_BEGIN = '0';
-static const char PROTO_C_RANGE_END = '6';
 
 void IEC61107Component::setup() {
   ESP_LOGD(TAG, "setup");
@@ -47,14 +37,13 @@ void IEC61107Component::setup() {
 #if USE_ESP8266
   iuart_ = make_unique<IEC61107UART>(*static_cast<uart::ESP8266UartComponent *>(this->parent_));
 #endif
-  this->clear_uart_input_buffer_();
   if (this->flow_control_pin_ != nullptr) {
     this->flow_control_pin_->setup();
   }
 
   this->set_timeout(BOOT_WAIT_S * 1000, [this]() {
     ESP_LOGD(TAG, "Boot timeout, component is ready to use");
-    this->clear_uart_input_buffer_();
+    this->clear_buffers_();
     this->set_next_state_(State::IDLE);
   });
 }
@@ -62,10 +51,9 @@ void IEC61107Component::setup() {
 void IEC61107Component::dump_config() {
   ESP_LOGCONFIG(TAG, "IEC61107:");
   LOG_UPDATE_INTERVAL(this);
-  //   ESP_LOGCONFIG(TAG, "  Flow Control Pin: %s",
-  //                 this->flow_control_pin_ ? this->flow_control_pin_->to_string().c_str() : "N/A");
+  LOG_PIN("  Flow Control Pin: ", this->flow_control_pin_);
   ESP_LOGCONFIG(TAG, "  Receive Timeout: %ums", this->receive_timeout_ms_);
-  ESP_LOGCONFIG(TAG, "  Meter Type: CE102M");
+  ESP_LOGCONFIG(TAG, "  Supported Meter Types: CE102M/CE301/CE303");
   ESP_LOGCONFIG(TAG, "  Sensors:");
   for (const auto &sensors : sensors_) {
     auto &s = sensors.second;
@@ -109,14 +97,12 @@ void IEC61107Component::report_failure(bool set_or_clear) {
 void IEC61107Component::loop() {
   if (!this->is_ready() || this->state_ == State::NOT_INITIALIZED)
     return;
-  const uint32_t now = millis();
   static uint32_t started_ms{0};
-  // uint32_t baud_rate = 4800;
 
   static auto req_iterator = this->requests_.end();
   static auto sens_iterator = this->sensors_.end();
 
-  if (!this->is_idling() && now - this->last_transmission_from_meter_timestamp_ >= receive_timeout_ms_) {
+  if (!this->is_idling() && this->check_rx_timeout_()) {
     ESP_LOGE(TAG, "No transmission from the meter.");
     // shall we retry?
     if (this->state_ == State::DATA_RECV) {
@@ -126,79 +112,51 @@ void IEC61107Component::loop() {
       return;
     }
   }
-
-  static char param_buff[32];
   char *in_buf_param_name = (char *) &in_buf_[1];  // skip first byte which is STX/SOH in R1 requests
   static ValuesArray vals;
   size_t frame_size;
 
   switch (this->state_) {
     case State::IDLE:
-      this->update_last_transmission_from_meter_timestamp_();
+      this->update_last_rx_time_();
       break;
 
     case State::WAIT:
-      if (this->check_wait_period_()) {
+      if (this->check_wait_timeout_()) {
         this->set_next_state_(this->next_state_after_wait_);
       }
-      this->update_last_transmission_from_meter_timestamp_();
+      this->update_last_rx_time_();
       break;
 
     case State::OPEN_SESSION:
       started_ms = millis();
-      this->report_state_();
-      this->clear_uart_input_buffer_();
+      this->log_state_();
+      this->clear_buffers_();
       this->send_frame_(CMD_OPEN_SESSION, sizeof(CMD_OPEN_SESSION));
       this->set_next_state_(State::OPEN_SESSION_GET_ID);
       req_iterator = this->requests_.begin();
       break;
 
     case State::OPEN_SESSION_GET_ID:
-      this->report_state_();
+      this->log_state_();
 
       if ((frame_size = this->receive_frame_ascii_())) {
-        char *packet = this->get_id_(frame_size);
-
-        if (packet == nullptr) {
+        char *meter_id = this->extract_meter_id_(frame_size);
+        if (meter_id == nullptr) {
           ESP_LOGE(TAG, "Invalid meter identification frame");
           this->abort_mission_();
           return;
         }
 
-        baud_rate_identification_ = frame_size >= 5 ? packet[4] : 0;
-        if (baud_rate_identification_ >= PROTO_B_RANGE_BEGIN && baud_rate_identification_ <= PROTO_B_RANGE_END) {
-          mode_ = PROTOCOL_MODE_B;
-        } else if (baud_rate_identification_ >= PROTO_C_RANGE_BEGIN && baud_rate_identification_ <= PROTO_C_RANGE_END) {
-          mode_ = PROTOCOL_MODE_C;
-        } else {
-          mode_ = PROTOCOL_MODE_A;
-        }
-
-        ESP_LOGD(TAG, "Meter reported protocol: %c", (char) mode_);
-        if (mode_ != PROTOCOL_MODE_A) {
-          ESP_LOGD(TAG, "Meter reported max baud rate: %u bps ('%c')",
-                   identification_to_baud_rate_(baud_rate_identification_), baud_rate_identification_);
-        }
-
-        auto negotiated_bps = identification_to_baud_rate_(baud_rate_identification_);
-        if (mode_ != PROTOCOL_MODE_C) {
-          ESP_LOGE(TAG, "Unsupported protocol mode '%c'.", (char) mode_);
-          this->abort_mission_();
-          return;
-        }
-        this->prepare_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
-        this->out_buf_[2] = '5';  // 9600 // this->baud_rate_identification_;
-        this->out_buf_[3] = '1';  // this->readout_mode_ ? '0' : '1';
-        this->send_frame_();
-
+        this->send_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
         this->set_next_state_delayed_(this->delay_between_requests_ms_, State::ACK_START_GET_INFO);
       }
       break;
 
     case State::ACK_START_GET_INFO:
-      this->report_state_();
+      this->log_state_();
       frame_size = this->receive_frame_r1_(SOH);
-      if (frame_size == 0)  // waiting for more data
+      if (frame_size == 0)  // wait for more data until timeout
         return;
 
       if (!get_values_from_brackets_(in_buf_param_name, vals)) {
@@ -208,36 +166,35 @@ void IEC61107Component::loop() {
       }
 
       this->set_next_state_(State::DATA_ENQ);
-      //      this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_ENQ);
       break;
 
     case State::DATA_ENQ:
-      this->report_state_();
+      this->log_state_();
       if (req_iterator == this->requests_.end()) {
         ESP_LOGD(TAG, "All requests done");
         this->set_next_state_(State::CLOSE_SESSION);
         break;
       } else {
         ESP_LOGD(TAG, "Requesting data for '%s'", *req_iterator);
-        this->prepare_request_frame_(*req_iterator);
-        this->send_frame_();
+        this->prepare_frame_r1_(*req_iterator);
+        this->send_frame_prepared_();
         this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_RECV);
       }
       break;
 
     case State::DATA_RECV:
-      this->report_state_();
+      this->log_state_();
 
       frame_size = this->receive_frame_r1_(STX);
-      if (frame_size == 0)  // waiting for more data
+      if (frame_size == 0)  // wait for more data until timeout
         return;
       else {
         this->set_next_state_(State::DATA_NEXT);
 
         ESP_LOGD(TAG, "Data received for '%s'", *req_iterator);
 
-        in_bcc_ = this->r1_frame_crc(in_buf_, frame_size);
-        if (in_bcc_ != in_buf_[frame_size - 1]) {
+        uint8_t bcc = this->calculate_crc_frame_r1_(in_buf_, frame_size);
+        if (bcc != in_buf_[frame_size - 1]) {
           ESP_LOGE(TAG, "BCC error. Skipping data packet.");
           return;
         }
@@ -252,19 +209,19 @@ void IEC61107Component::loop() {
                  "'%s', value4 '%s'",
                  in_buf_param_name, vals[0], vals[1], vals[2], vals[3]);
 
-        if (in_buf_param_name[0] == 0x00) {
+        if (in_buf_param_name[0] == '\0') {
           ESP_LOGE(TAG, "Param name missing. Skipping frame.");
           return;
         }
 
-        static const size_t param_buff_size = IEC61107SensorBase::MAX_REQUEST_SIZE + 2;
-        static char param_buff[param_buff_size]{0};
-        snprintf(param_buff, param_buff_size, "%s()", in_buf_param_name);
-        param_buff[param_buff_size - 1] = 0;
+        static const size_t param_name_buff_size = IEC61107SensorBase::MAX_REQUEST_SIZE + 2;
+        static char param_name_buff[param_name_buff_size]{0};
 
-        auto range = sensors_.equal_range(param_buff);
+        snprintf(param_name_buff, param_name_buff_size, "%s()", in_buf_param_name);
+        param_name_buff[param_name_buff_size - 1] = '\0';
+
+        auto range = sensors_.equal_range(param_name_buff);
         for (auto it = range.first; it != range.second; ++it) {
-          ESP_LOGD(TAG, "Sensor %s, idx %d", it->second->get_request(), it->second->get_index());
           if (!it->second->is_failed())
             set_sensor_value_(it->second, vals);
         }
@@ -272,14 +229,14 @@ void IEC61107Component::loop() {
       break;
 
     case State::DATA_FAIL:
-      this->report_state_();
+      this->log_state_();
       ESP_LOGW(TAG, "Data request failed. Value for '%s' not received. (Not supported ?)", *req_iterator);
-      this->update_last_transmission_from_meter_timestamp_();
+      this->update_last_rx_time_();
       this->set_next_state_(State::DATA_NEXT);
       break;
 
     case State::DATA_NEXT:
-      this->report_state_();
+      this->log_state_();
       req_iterator++;
       if (req_iterator != this->requests_.end()) {
         this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_ENQ);
@@ -289,7 +246,7 @@ void IEC61107Component::loop() {
       break;
 
     case State::CLOSE_SESSION:
-      this->report_state_();
+      this->log_state_();
       ESP_LOGD(TAG, "Closing session");
       this->send_frame_(CMD_CLOSE_SESSION, sizeof(CMD_CLOSE_SESSION));
       this->set_next_state_(State::PUBLISH);
@@ -298,9 +255,9 @@ void IEC61107Component::loop() {
       break;
 
     case State::PUBLISH:
-      this->report_state_();
+      this->log_state_();
       ESP_LOGD(TAG, "Publishing data");
-      this->update_last_transmission_from_meter_timestamp_();
+      this->update_last_rx_time_();
 
       if (sens_iterator != this->sensors_.end()) {
         sens_iterator->second->publish();
@@ -340,9 +297,10 @@ bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValuesArra
 
   uint8_t idx = sensor->get_index() - 1;
   if (idx >= 4) {
-    ESP_LOGE(TAG, "Invalid index %u", idx);
+    ESP_LOGE(TAG, "Invalid sensor index %u", idx);
     return false;
   }
+
   if (vals[idx][0] == 'E' && vals[idx][1] == 'R' && vals[idx][2] == 'R') {
     ESP_LOGE(TAG,
              "Parameter %s either not supported or request is improperly formed. Sensor will be disabled after few "
@@ -352,9 +310,8 @@ bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValuesArra
     return false;
   }
 
-  const char *str = vals[idx];  //.c_str();
-
-  ESP_LOGV(TAG, "Setting value for sensor '%s' to '%s', idx = %d", sensor->get_request(), str, idx + 1);
+  const char *str = vals[idx];
+  ESP_LOGD(TAG, "Setting value for sensor '%s' to '%s', idx = %d", sensor->get_request(), str, idx + 1);
 
   if (type == SensorType::SENSOR) {
     float f = 0;
@@ -372,7 +329,7 @@ bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValuesArra
   return ret;
 }
 
-uint8_t IEC61107Component::r1_frame_crc(const uint8_t *data, size_t length) {
+uint8_t IEC61107Component::calculate_crc_frame_r1_(const uint8_t *data, size_t length) {
   uint8_t crc = 0;
   if (length < 2) {
     return 0;
@@ -384,17 +341,16 @@ uint8_t IEC61107Component::r1_frame_crc(const uint8_t *data, size_t length) {
 }
 
 void IEC61107Component::set_next_state_delayed_(uint32_t ms, State next_state) {
-  ESP_LOGD(TAG, "Short delay before next step for %u ms", ms);
+  ESP_LOGD(TAG, "Short delay for %u ms", ms);
   set_next_state_(State::WAIT);
-  wait_start_timestamp_ = millis();
+  wait_start_time_ = millis();
   wait_period_ms_ = ms;
   next_state_after_wait_ = next_state;
 }
 
-void IEC61107Component::prepare_request_frame_(const char *request) {
+void IEC61107Component::prepare_frame_r1_(const char *request) {
   // assume request has format "XXXX(params)" if there is closing bracket
   // if not - assume it is "XXXX" and add ()
-  //  std::string frame = "\x01R1\x02" + request + (request.back() == ')' ? "\x03" : "()\x03");
 
   auto len = strlen(request);
   if (request[len - 1] == ')') {
@@ -404,11 +360,11 @@ void IEC61107Component::prepare_request_frame_(const char *request) {
     len += 2;
   }
   data_out_size_ = len + 6;
-  uint8_t bcc = r1_frame_crc(out_buf_, data_out_size_);
+  uint8_t bcc = this->calculate_crc_frame_r1_(out_buf_, data_out_size_);
   out_buf_[data_out_size_ - 1] = bcc;
 }
 
-void IEC61107Component::send_frame_() {
+void IEC61107Component::send_frame_prepared_() {
   if (this->flow_control_pin_ != nullptr)
     this->flow_control_pin_->digital_write(true);
 
@@ -427,7 +383,7 @@ void IEC61107Component::prepare_frame_(const uint8_t *data, size_t length) {
 
 void IEC61107Component::send_frame_(const uint8_t *data, size_t length) {
   this->prepare_frame_(data, length);
-  this->send_frame_();
+  this->send_frame_prepared_();
 }
 
 size_t IEC61107Component::receive_frame_(FrameStopFunction stop_fn) {
@@ -463,7 +419,7 @@ size_t IEC61107Component::receive_frame_(FrameStopFunction stop_fn) {
       ESP_LOGV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
       ret_val = data_in_size_;
       data_in_size_ = 0;
-      update_last_transmission_from_meter_timestamp_();
+      this->update_last_rx_time_();
       return ret_val;
     }
     yield();
@@ -484,24 +440,25 @@ size_t IEC61107Component::receive_frame_r1_(uint8_t start_byte) {
   return receive_frame_(frame_end_iec);
 }
 
-void IEC61107Component::clear_uart_input_buffer_() {
+void IEC61107Component::clear_buffers_() {
   int available = this->available();
-  int len;
-
   if (available > 0) {
     ESP_LOGVV(TAG, "Cleaning garbage from UART input buffer: %d bytes", available);
   }
 
+  int len;
   while (available > 0) {
     len = std::min(available, (int) MAX_IN_BUF_SIZE);
-
     this->read_array(in_buf_, len);
     available -= len;
   }
+  memset(in_buf_, 0, MAX_IN_BUF_SIZE);
   data_in_size_ = 0;
+  memset(out_buf_, 0, MAX_OUT_BUF_SIZE);
+  data_out_size_ = 0;
 }
 
-char *IEC61107Component::get_id_(size_t frame_size) {
+char *IEC61107Component::extract_meter_id_(size_t frame_size) {
   uint8_t *p = &in_buf_[frame_size - 1 - 2 /*\r\n*/];
   size_t min_id_data_size = 7;  // min packet is '/XXXZ\r\n'
 
@@ -509,7 +466,6 @@ char *IEC61107Component::get_id_(size_t frame_size) {
     if ('/' == *p) {
       if ((size_t) (&in_buf_[MAX_IN_BUF_SIZE - 1] - p) < min_id_data_size) {
         ESP_LOGV(TAG, "Invalid Meter ID packet.");
-
         // garbage, ignore
         break;
       }
@@ -555,15 +511,7 @@ uint8_t IEC61107Component::get_values_from_brackets_(char *line, ValuesArray &va
   return idx;  // at least one bracket found
 }
 
-void IEC61107Component::reset_bcc_() { this->bcc_ = 0; }
-
-void IEC61107Component::update_bcc_(const uint8_t *data, size_t size) {
-  for (size_t i = 0; i < size; i++) {
-    this->bcc_ = (this->bcc_ + data[i]) & 0x7f;
-  }
-}
-
-void IEC61107Component::report_state_() {
+void IEC61107Component::log_state_() {
   static State last_reported_state{State::NOT_INITIALIZED};
   const char *state_txt;
 
@@ -613,32 +561,6 @@ void IEC61107Component::report_state_() {
     ESP_LOGV(TAG, "%s", state_txt);
     last_reported_state = state_;
   }
-}
-
-uint32_t IEC61107Component::identification_to_baud_rate_(char z) {
-  uint32_t rate;
-
-  if (z >= PROTO_B_RANGE_BEGIN && z <= PROTO_B_RANGE_END) {
-    rate = BAUDRATES[1 + z - PROTO_B_RANGE_BEGIN];
-  } else if (z >= PROTO_C_RANGE_BEGIN && z <= PROTO_C_RANGE_END) {
-    rate = BAUDRATES[z - PROTO_C_RANGE_BEGIN];
-  } else {
-    rate = 0;
-  }
-
-  return rate;
-}
-
-char IEC61107Component::baud_rate_to_identification_(uint32_t baud_rate) {
-  // PROTOCOL_MODE_C == mode_
-  for (size_t i = 0; i < (sizeof(BAUDRATES) / sizeof(uint32_t)); i++) {
-    if (baud_rate == BAUDRATES[i]) {
-      return PROTO_C_RANGE_BEGIN + i;
-    }
-  }
-
-  // return lowest baudrate for unknown char
-  return PROTO_C_RANGE_BEGIN;
 }
 
 }  // namespace iec61107
