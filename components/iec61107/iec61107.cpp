@@ -207,7 +207,8 @@ void IEC61107Component::loop() {
         return;
       }
 
-      this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_ENQ);
+      this->set_next_state_(State::DATA_ENQ);
+      //      this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_ENQ);
       break;
 
     case State::DATA_ENQ:
@@ -459,7 +460,7 @@ size_t IEC61107Component::receive_frame_(FrameStopFunction stop_fn) {
     }
 
     if (stop_fn(in_buf_, data_in_size_)) {
-      printf("\nRX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
+      ESP_LOGV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
       ret_val = data_in_size_;
       data_in_size_ = 0;
       update_last_transmission_from_meter_timestamp_();
