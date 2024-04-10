@@ -480,7 +480,6 @@ void IEC61107Component::send_frame_(const uint8_t *data, size_t length) {
 }
 
 size_t IEC61107Component::receive_frame_() {
-  App.feed_wdt();
   const uint32_t max_while_ms = 25;
   size_t ret_val;
   auto count = this->available();
@@ -504,13 +503,13 @@ size_t IEC61107Component::receive_frame_() {
       if (!iuart_->read_one_byte(p)) {
         return 0;
       }
-      if (etx_detected && *p == 0) {
-        // skip zeroes after ETX
-        ESP_LOGV(TAG, "Skipping zeroes after ETX");
-        yield();
-        App.feed_wdt();
-        continue;
-      }
+      // if (etx_detected && *p == 0) {
+      //   // skip zeroes after ETX
+      //   ESP_LOGV(TAG, "Skipping zeroes after ETX");
+      //   yield();
+      //   App.feed_wdt();
+      //   continue;
+      // }
       data_in_size_++;
     } else {
       memmove(in_buf_, in_buf_ + 1, data_in_size_ - 1);
@@ -599,8 +598,6 @@ size_t IEC61107Component::receive_frame_() {
       data_in_size_ = 0;
       return ret_val;
     }
-    yield();
-    App.feed_wdt();
   }
   return 0;
 }
@@ -686,9 +683,7 @@ void IEC61107Component::reset_bcc_() { this->bcc_ = 0; }
 void IEC61107Component::update_bcc_(const uint8_t *data, size_t size) {
   for (size_t i = 0; i < size; i++) {
     this->bcc_ = (this->bcc_ + data[i]) & 0x7f;
-    //    this->bcc_ += data[i];
   }
-  //  this->bcc_ &= 0x7f;
 }
 
 void IEC61107Component::report_state_() {
