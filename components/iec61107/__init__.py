@@ -57,7 +57,7 @@ CONFIG_SCHEMA = cv.All(
                 CONF_RECEIVE_TIMEOUT, default="500ms"
             ): cv.positive_time_period_milliseconds,
             cv.Optional(
-                CONF_DELAY_BETWEEN_REQUESTS, default="150ms"
+                CONF_DELAY_BETWEEN_REQUESTS, default="100ms"
             ): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): cv.update_interval,
             cv.Optional(CONF_REBOOT_AFTER_FAILURE, default=0): cv.int_range(
