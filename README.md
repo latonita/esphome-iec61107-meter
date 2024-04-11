@@ -63,7 +63,7 @@ Basic support of iec61107 meters
 # Пример конфигурации для однофазного счетчика CE102M
 ```
 esphome:
-  name: energomera-ce102
+  name: energomera-ce102m
 
 esp32:
   board: esp32dev
@@ -74,48 +74,48 @@ logger:
   level: DEBUG
 
 external_components:
-  - source: github://latonita/esphome-iec61107-meter@v1
-    refresh: 10s
+  - source: github://latonita/esphome-iec61107-meter
+    refresh: 30s
     components: [iec61107]
 
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-  reboot_timeout: 5min
-  power_save_mode: NONE
-
-api:
-  password: !secret api_password
-
-ota:
-  password: !secret ota_password
-
 uart:
-    rx_pin: GPIO16
-    tx_pin: GPIO17
-    baud_rate: 9600
-    data_bits: 7
-    parity: EVEN
-    stop_bits: 1
+  rx_pin: GPIO16
+  tx_pin: GPIO17
+  baud_rate: 9600
+  data_bits: 7
+  parity: EVEN
+  stop_bits: 1
 
 iec61107:
-  id: ce102
+  id: ce102m
   update_interval: 30s
 #  receive_timeout: 500ms
+#  delay_between_requests: 150ms
 #  flow_control_pin: GPIO32
 
 sensor:
   - platform: iec61107
-    request: ET0PE(02)
-    name: Consumed energy T1
+    request: ET0PE()
+    index: 1
+    name: Energy Total
     unit_of_measurement: kWh
     accuracy_decimals: 3
     device_class: energy
     state_class: total_increasing
 
   - platform: iec61107
-    request: ET0PE(03)
-    name: Consumed energy T2
+    request: ET0PE()
+    index: 2
+    name: Energy T1
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+
+  - platform: iec61107
+    request: ET0PE()
+    index: 3
+    name: Energy T2
     unit_of_measurement: kWh
     accuracy_decimals: 3
     device_class: energy
@@ -138,7 +138,7 @@ sensor:
     state_class: measurement
 
   - platform: iec61107
-    name: Frequency
+    name: Frequency L1
     request: FREQU()
     unit_of_measurement: Hz
     accuracy_decimals: 2
@@ -160,7 +160,7 @@ sensor:
     accuracy_decimals: 3
     device_class: power
     state_class: measurement
-  
+
 text_sensor:
   - platform: iec61107
     name: Serial number
@@ -173,25 +173,12 @@ text_sensor:
   - platform: iec61107
     name: Date
     request: DATE_()
-```
-
-# Пример конфигурации для трехфазных счетчиков CE301, CE303
-```
-esphome:
-  name: energomera-ce301
-
-esp32:
-  board: esp32dev
-  framework:
-    type: arduino
-
-logger:
-  level: DEBUG
-
-external_components:
-  - source: github://latonita/esphome-iec61107-meter@v1
-    refresh: 10s
-    components: [iec61107]
+    filters:
+      - lambda: |-
+          std::string str{x};
+          str.erase(0,3);
+          str.insert(6,"20");
+          return str;
 
 wifi:
   ssid: !secret wifi_ssid
@@ -205,32 +192,49 @@ api:
 ota:
   password: !secret ota_password
 
+```
+
+# Пример конфигурации для трехфазных счетчиков CE301, CE303
+```
+esphome:
+  name: energomera-ce303
+
+esp8266:
+  board: nodemcuv2
+
+logger:
+  level: DEBUG
+
+external_components:
+  - source: github://latonita/esphome-iec61107-meter
+    refresh: 10s
+    components: [iec61107]
+
 uart:
-    rx_pin: GPIO16
-    tx_pin: GPIO17
-    baud_rate: 9600
-    data_bits: 7
-    parity: EVEN
-    stop_bits: 1
+  rx_pin: D5
+  tx_pin: D6
+  baud_rate: 9600
+  data_bits: 7
+  parity: EVEN
+  stop_bits: 1
+  rx_buffer_size: 512
 
 iec61107:
-  id: ce301
-  update_interval: 30s
+  id: ce303
+  address: 123456789
+  update_interval: 10s
+  delay_between_requests: 50ms
 #  receive_timeout: 500ms
-#  flow_control_pin: GPIO32
 
 sensor:
-  - platform: iec61107
-    request: ET0PE(02)
-    name: Consumed energy T1
-    unit_of_measurement: kWh
-    accuracy_decimals: 3
-    device_class: energy
-    state_class: total_increasing
+  - platform: uptime
+    name: Uptime Sensor
+    update_interval: 10s
 
   - platform: iec61107
-    request: ET0PE(03)
-    name: Consumed energy T2
+    request: ET0PE()
+    name: Total energy
+    index: 1
     unit_of_measurement: kWh
     accuracy_decimals: 3
     device_class: energy
@@ -291,14 +295,6 @@ sensor:
     state_class: measurement
 
   - platform: iec61107
-    name: Frequency
-    request: FREQU()
-    unit_of_measurement: Hz
-    accuracy_decimals: 2
-    device_class: frequency
-    state_class: measurement
-
-  - platform: iec61107
     name: Power Active
     request: POWEP()
     index: 1
@@ -333,7 +329,7 @@ sensor:
     index: 3
     device_class: power
     state_class: measurement
-  
+
 text_sensor:
   - platform: iec61107
     name: Serial number
@@ -346,5 +342,21 @@ text_sensor:
   - platform: iec61107
     name: Date
     request: DATE_()
+    filters:
+      - lambda: |-
+          std::string str{x};
+          str.erase(0,3);
+          str.insert(6,"20");
+          return str;
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  password: !secret api_password
+
+ota:
+  password: !secret ota_password
 
 ```

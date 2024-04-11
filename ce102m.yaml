@@ -1,5 +1,5 @@
 esphome:
-  name: iec-ce102
+  name: energomera-ce102m
 
 esp32:
   board: esp32dev
@@ -7,52 +7,51 @@ esp32:
     type: arduino
 
 logger:
-  level: VERBOSE
+  level: DEBUG
 
 external_components:
   - source: github://latonita/esphome-iec61107-meter
-    refresh: 10s
+    refresh: 30s
     components: [iec61107]
 
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-  reboot_timeout: 5min
-  power_save_mode: NONE
-
-api:
-  password: !secret api_password
-
-ota:
-  password: !secret ota_password
-
 uart:
-    rx_pin: GPIO16
-    tx_pin: GPIO17
-    baud_rate: 9600
-    data_bits: 7
-    parity: EVEN
-    stop_bits: 1
+  rx_pin: GPIO16
+  tx_pin: GPIO17
+  baud_rate: 9600
+  data_bits: 7
+  parity: EVEN
+  stop_bits: 1
 
 iec61107:
-  id: ce102
+  id: ce102m
   update_interval: 30s
 #  receive_timeout: 500ms
+#  delay_between_requests: 150ms
 #  flow_control_pin: GPIO32
-#  readout_enabled: true
 
 sensor:
   - platform: iec61107
-    request: ET0PE(02)
-    name: Consumed energy T1
+    request: ET0PE()
+    index: 1
+    name: Energy Total
     unit_of_measurement: kWh
     accuracy_decimals: 3
     device_class: energy
     state_class: total_increasing
 
   - platform: iec61107
-    request: ET0PE(03)
-    name: Consumed energy T2
+    request: ET0PE()
+    index: 2
+    name: Energy T1
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+
+  - platform: iec61107
+    request: ET0PE()
+    index: 3
+    name: Energy T2
     unit_of_measurement: kWh
     accuracy_decimals: 3
     device_class: energy
@@ -97,7 +96,7 @@ sensor:
     accuracy_decimals: 3
     device_class: power
     state_class: measurement
-  
+
 text_sensor:
   - platform: iec61107
     name: Serial number
@@ -110,11 +109,21 @@ text_sensor:
   - platform: iec61107
     name: Date
     request: DATE_()
+    filters:
+      - lambda: |-
+          std::string str{x};
+          str.erase(0,3);
+          str.insert(6,"20");
+          return str;
 
-  - platform: iec61107
-    name: Info
-    request: VINFO()
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 5min
+  power_save_mode: NONE
 
-  - platform: iec61107
-    name: Model
-    request: MODEL()
+api:
+  password: !secret api_password
+
+ota:
+  password: !secret ota_password
