@@ -7,8 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <memory>
-#include <unordered_map>
-#include <set>
+#include <map>
 
 #include "iec61107uart.h"
 #include "iec61107sensor.h"
@@ -20,28 +19,9 @@ static const size_t MAX_IN_BUF_SIZE = 256;
 static const size_t MAX_OUT_BUF_SIZE = 84;
 
 const uint8_t VAL_NUM = 12;
-using ValuesArray = std::array<const char *, VAL_NUM>;
-using ParamName = char *;
+using ValueRefsArray = std::array<const char *, VAL_NUM>;
 
-struct CharPtrEqual {
-  bool operator()(const char *a, const char *b) const { return std::strcmp(a, b) == 0; }
-};
-struct CharPtrComparator {
-  bool operator()(const char *a, const char *b) const { return std::strcmp(a, b) < 0; }
-};
-struct CharPtrHash {
-  std::size_t operator()(const char *str) const {
-    std::size_t hash = 0;
-    while (*str) {
-      hash = (hash * 131) + *str;
-      ++str;
-    }
-    return hash;
-  }
-};
-
-using SensorMap = std::unordered_multimap<const char *, IEC61107SensorBase *, CharPtrHash, CharPtrEqual>;
-using RequestsSet = std::set<const char *, CharPtrComparator>;
+using SensorMap = std::multimap<std::string, IEC61107SensorBase *>;
 using FrameStopFunction = std::function<bool(uint8_t *buf, size_t size)>;
 
 class IEC61107Component : public PollingComponent, public uart::UARTDevice {
@@ -72,7 +52,6 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   GPIOPin *flow_control_pin_{nullptr};
   std::unique_ptr<IEC61107UART> iuart_;
   SensorMap sensors_;
-  RequestsSet requests_;
   binary_sensor::BinarySensor *indicator_{};
 
   enum class State : uint8_t {
@@ -123,9 +102,9 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   bool check_rx_timeout_() { return millis() - this->last_rx_time_ >= receive_timeout_ms_; }
 
   char *extract_meter_id_(size_t frame_size);
-  uint8_t get_values_from_brackets_(char *line, ValuesArray &vals);
-
-  bool set_sensor_value_(IEC61107SensorBase *sensor, ValuesArray &vals);
+  
+  uint8_t get_values_from_brackets_(char *line, ValueRefsArray &vals);
+  bool set_sensor_value_(IEC61107SensorBase *sensor, ValueRefsArray &vals);
 
   void report_failure(bool set_or_clear);
   void abort_mission_();

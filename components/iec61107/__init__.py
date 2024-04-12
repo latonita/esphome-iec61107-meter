@@ -1,3 +1,4 @@
+import re
 from esphome import pins
 import esphome.codegen as cg
 import esphome.config_validation as cv
@@ -34,8 +35,19 @@ IEC61107Component = iec61107_ns.class_(
 
 
 def validate_request_format(value):
+    if not value.endswith(")"):
+        value += "()"
+
+    pattern = r"\b[a-zA-Z_][a-zA-Z0-9_]*\s*\([^)]*\)$"
+    if not re.match(pattern, value):
+        raise cv.Invalid(
+            "Invalid request format. Proper is 'REQUEST' or 'REQUEST()' or 'REQUEST(ARGS)'"
+        )
+
     if len(value) > 15:
-        raise cv.Invalid("Request length must be no longer than 15 characters")
+        raise cv.Invalid(
+            "Request length must be no longer than 15 characters including ()"
+        )
     return value
 
 
@@ -57,7 +69,7 @@ CONFIG_SCHEMA = cv.All(
                 CONF_RECEIVE_TIMEOUT, default="500ms"
             ): cv.positive_time_period_milliseconds,
             cv.Optional(
-                CONF_DELAY_BETWEEN_REQUESTS, default="100ms"
+                CONF_DELAY_BETWEEN_REQUESTS, default="150ms"
             ): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): cv.update_interval,
             cv.Optional(CONF_REBOOT_AFTER_FAILURE, default=0): cv.int_range(

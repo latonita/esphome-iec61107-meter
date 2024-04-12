@@ -24,6 +24,8 @@ static const uint8_t CMD_CLOSE_SESSION[] = {SOH, 0x42, 0x30, ETX, 0x75};
 
 static constexpr uint8_t BOOT_WAIT_S = 10;
 
+static char empty_str[] = "";
+
 static char format_hex_char(uint8_t v) { return v >= 10 ? 'A' + (v - 10) : '0' + v; }
 
 static std::string format_frame_pretty(const uint8_t *data, size_t length) {
@@ -112,13 +114,12 @@ void IEC61107Component::dump_config() {
   ESP_LOGCONFIG(TAG, "  Sensors:");
   for (const auto &sensors : sensors_) {
     auto &s = sensors.second;
-    ESP_LOGCONFIG(TAG, "    REQUEST: %s", s->get_request());
+    ESP_LOGCONFIG(TAG, "    REQUEST: %s", s->get_request().c_str());
   }
 }
 
 void IEC61107Component::register_sensor(IEC61107SensorBase *sensor) {
   this->sensors_.insert({sensor->get_request(), sensor});
-  this->requests_.insert(sensor->get_request());
 }
 
 void IEC61107Component::abort_mission_() {
@@ -154,7 +155,7 @@ void IEC61107Component::loop() {
     return;
   static uint32_t started_ms{0};
 
-  static auto req_iterator = this->requests_.end();
+  static auto req_iterator = this->sensors_.end();
   static auto sens_iterator = this->sensors_.end();
 
   if (!this->is_idling() && this->check_rx_timeout_()) {
@@ -168,7 +169,7 @@ void IEC61107Component::loop() {
     }
   }
   char *in_buf_param_name = (char *) &in_buf_[1];  // skip first byte which is STX/SOH in R1 requests
-  static ValuesArray vals;
+  static ValueRefsArray vals;
   size_t frame_size;
 
   switch (this->state_) {
@@ -191,7 +192,7 @@ void IEC61107Component::loop() {
       uint8_t open_cmd_len = snprintf((char *) open_cmd, 32, "/?%s!\r\n", this->meter_address_.c_str());
       this->send_frame_(open_cmd, open_cmd_len);
       this->set_next_state_(State::OPEN_SESSION_GET_ID);
-      req_iterator = this->requests_.begin();
+      req_iterator = this->sensors_.begin();
     } break;
 
     case State::OPEN_SESSION_GET_ID:
@@ -229,13 +230,14 @@ void IEC61107Component::loop() {
 
     case State::DATA_ENQ:
       this->log_state_();
-      if (req_iterator == this->requests_.end()) {
+      if (req_iterator == this->sensors_.end()) {
         ESP_LOGD(TAG, "All requests done");
         this->set_next_state_(State::CLOSE_SESSION);
         break;
       } else {
-        ESP_LOGD(TAG, "Requesting data for '%s'", *req_iterator);
-        this->prepare_frame_r1_(*req_iterator);
+        auto req = req_iterator->first;
+        ESP_LOGD(TAG, "Requesting data for '%s'", req.c_str());
+        this->prepare_frame_r1_(req.c_str());
         this->send_frame_prepared_();
         this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_RECV);
       }
@@ -249,37 +251,41 @@ void IEC61107Component::loop() {
         return;
       else {
         this->set_next_state_(State::DATA_NEXT);
-
-        ESP_LOGV(TAG, "Data received for '%s'", *req_iterator);
+        auto req = req_iterator->first;
+        ESP_LOGD(TAG, "Data received for '%s'", req.c_str());
 
         uint8_t bcc = this->calculate_crc_frame_r1_(in_buf_, frame_size);
         if (bcc != in_buf_[frame_size - 1]) {
           ESP_LOGE(TAG, "BCC error. Skipping data packet.");
           return;
         }
-
-        if (!get_values_from_brackets_(in_buf_param_name, vals)) {
+        uint8_t brackets_found = get_values_from_brackets_(in_buf_param_name, vals);
+        if (!brackets_found) {
           ESP_LOGE(TAG, "Invalid frame format: '%s'", in_buf_param_name);
           return;
         }
 
         ESP_LOGD(TAG,
-                 "Data received: param '%s', value1 '%s', value2 '%s', value3 "
-                 "'%s', value4 '%s'",
-                 in_buf_param_name, vals[0], vals[1], vals[2], vals[3]);
+                 "Received name: '%s', values: %d, idx: 1(%s), 2(%s), 3(%s), 4(%s), 5(%s), 6(%s), 7(%s), 8(%s), 9(%s), "
+                 "10(%s), 11(%s), 12(%s)",
+                 in_buf_param_name, brackets_found, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6],
+                 vals[7], vals[8], vals[9], vals[10], vals[11]);
 
         if (in_buf_param_name[0] == '\0') {
-          ESP_LOGE(TAG, "Param name missing. Skipping frame.");
+          if (vals[0][0] == 'E' && vals[0][1] == 'R' && vals[0][2] == 'R') {
+            ESP_LOGE(TAG, "Request '%s' either not supported or malformed. Error code %s", in_buf_param_name, vals[0]);
+          } else {
+            ESP_LOGE(TAG, "Request '%s' either not supported or malformed.", in_buf_param_name);
+          }
           return;
         }
 
-        static const size_t param_name_buff_size = IEC61107SensorBase::MAX_REQUEST_SIZE + 2;
-        static char param_name_buff[param_name_buff_size]{0};
+        if (req_iterator->second->get_function() != in_buf_param_name) {
+          ESP_LOGE(TAG, "Returned data name mismatch. Skipping frame");
+          return;
+        }
 
-        snprintf(param_name_buff, param_name_buff_size, "%s()", in_buf_param_name);
-        param_name_buff[param_name_buff_size - 1] = '\0';
-
-        auto range = sensors_.equal_range(param_name_buff);
+        auto range = sensors_.equal_range(req);
         for (auto it = range.first; it != range.second; ++it) {
           if (!it->second->is_failed())
             set_sensor_value_(it->second, vals);
@@ -289,15 +295,15 @@ void IEC61107Component::loop() {
 
     case State::DATA_FAIL:
       this->log_state_();
-      ESP_LOGW(TAG, "Data request failed. Value for '%s' not received. (Not supported ?)", *req_iterator);
+      printf("\nResponse not received. Next.");
       this->update_last_rx_time_();
       this->set_next_state_(State::DATA_NEXT);
       break;
 
     case State::DATA_NEXT:
       this->log_state_();
-      req_iterator++;
-      if (req_iterator != this->requests_.end()) {
+      req_iterator = this->sensors_.upper_bound(req_iterator->first);
+      if (req_iterator != this->sensors_.end()) {
         this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_ENQ);
       } else {
         this->set_next_state_delayed_(this->delay_between_requests_ms_, State::CLOSE_SESSION);
@@ -350,27 +356,18 @@ bool char2float(const char *str, float &value) {
   return *end == '\0';
 }
 
-bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValuesArray &vals) {
+bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValueRefsArray &vals) {
   auto type = sensor->get_type();
   bool ret = true;
 
   uint8_t idx = sensor->get_index() - 1;
-  if (idx >= 4) {
+  if (idx >= VAL_NUM) {
     ESP_LOGE(TAG, "Invalid sensor index %u", idx);
     return false;
   }
 
-  if (vals[idx][0] == 'E' && vals[idx][1] == 'R' && vals[idx][2] == 'R') {
-    ESP_LOGE(TAG,
-             "Parameter %s either not supported or request is improperly formed. Sensor will be disabled after few "
-             "tries. %s",
-             sensor->get_request(), vals[idx]);
-    sensor->record_failure();
-    return false;
-  }
-
   const char *str = vals[idx];
-  ESP_LOGD(TAG, "Setting value for sensor '%s' to '%s', idx = %d", sensor->get_request(), str, idx + 1);
+  ESP_LOGD(TAG, "Setting value for sensor '%s' to '%s', idx = %d", sensor->get_request().c_str(), str, idx + 1);
 
   if (type == SensorType::SENSOR) {
     float f = 0;
@@ -408,17 +405,9 @@ void IEC61107Component::set_next_state_delayed_(uint32_t ms, State next_state) {
 }
 
 void IEC61107Component::prepare_frame_r1_(const char *request) {
-  // assume request has format "XXXX(params)" if there is closing bracket
-  // if not - assume it is "XXXX" and add ()
-
-  auto len = strlen(request);
-  if (request[len - 1] == ')') {
-    snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "\x01R1\x02%s\x03", request);
-  } else {
-    snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "\x01R1\x02%s()\x03", request);
-    len += 2;
-  }
-  data_out_size_ = len + 6;
+  // we assume request has format "XXXX(params)"
+  // we assume it always has brackets
+  data_out_size_ = 1 + snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "\x01R1\x02%s\x03", request);
   uint8_t bcc = this->calculate_crc_frame_r1_(out_buf_, data_out_size_);
   out_buf_[data_out_size_ - 1] = bcc;
 }
@@ -542,11 +531,9 @@ char *IEC61107Component::extract_meter_id_(size_t frame_size) {
   return nullptr;
 }
 
-uint8_t IEC61107Component::get_values_from_brackets_(char *line, ValuesArray &vals) {
+uint8_t IEC61107Component::get_values_from_brackets_(char *line, ValueRefsArray &vals) {
   // line = "VOLTA(100.1)VOLTA(200.1)VOLTA(300.1)VOLTA(400.1)"
-  static char empty_str[] = "";
   vals.fill(empty_str);
-  //  vals[0] = vals[1] = vals[2] = vals[3] = empty_str;
 
   uint8_t idx = 0;
   bool got_param_name{false};

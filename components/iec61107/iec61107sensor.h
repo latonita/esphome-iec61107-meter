@@ -20,10 +20,21 @@ class IEC61107SensorBase {
   virtual void publish() = 0;
 
   void set_request(const char *req) {
-    strncpy(request_, req, MAX_REQUEST_SIZE);
-    request_[MAX_REQUEST_SIZE] = '\0';
+    // request can be:
+    // 1. REQUEST
+    // 2. REQUEST()
+    // 3. REQUEST(PARAMETER)
+    // But after checks in sensor.py it only can be 2 and 3
+    request_ = req;
+
+    char *p = strchr(req, '(');
+    if (p != nullptr) {
+      size_t len = p - req;
+      function_.assign(req, len);
+    }
   };
-  const char *get_request() const { return request_; }
+  const std::string &get_request() const { return request_; }
+  const std::string &get_function() const { return function_; }
 
   void set_index(const uint8_t idx) { idx_ = idx; };
   uint8_t get_index() const { return idx_; };
@@ -45,7 +56,8 @@ class IEC61107SensorBase {
   bool is_failed() { return tries_ == MAX_TRIES; }
 
  protected:
-  char request_[MAX_REQUEST_SIZE + 1];
+  std::string request_;
+  std::string function_;
   uint8_t idx_{1};
   bool has_value_;
   uint8_t tries_{0};
@@ -69,21 +81,17 @@ class IEC61107Sensor : public IEC61107SensorBase, public sensor::Sensor {
 #ifdef USE_TEXT_SENSOR
 class IEC61107TextSensor : public IEC61107SensorBase, public text_sensor::TextSensor {
  public:
-  static const uint8_t MAX_TEXT_SIZE = 63;
   SensorType get_type() const override { return TEXT_SENSOR; }
   void publish() override { publish_state(value_); }
 
   void set_value(const char *value) {
-    strncpy(value_, value, MAX_TEXT_SIZE);
-    request_[MAX_TEXT_SIZE] = '\0';
-    //    value_ = value;
+    value_ = value;
     has_value_ = true;
     tries_ = 0;
   }
 
  protected:
-  //  std::string value_;
-  char value_[MAX_TEXT_SIZE + 1]{0};
+  std::string value_;
 };
 #endif
 
