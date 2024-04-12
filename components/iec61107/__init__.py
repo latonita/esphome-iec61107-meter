@@ -6,6 +6,7 @@ from esphome.components import uart, binary_sensor
 from esphome.const import (
     CONF_ID,
     CONF_ADDRESS,
+    CONF_BAUD_RATE,
     CONF_RECEIVE_TIMEOUT,
     CONF_UPDATE_INTERVAL,
     CONF_FLOW_CONTROL_PIN,
@@ -28,10 +29,14 @@ CONF_DELAY_BETWEEN_REQUESTS = "delay_between_requests"
 CONF_INDICATOR = "indicator"
 CONF_REBOOT_AFTER_FAILURE = "reboot_after_failure"
 
+CONF_BAUD_RATE_HANDSHAKE = "baud_rate_handshake"
+
 iec61107_ns = cg.esphome_ns.namespace("iec61107")
 IEC61107Component = iec61107_ns.class_(
     "IEC61107Component", cg.Component, uart.UARTDevice
 )
+
+BAUD_RATES = [300, 600, 1200, 2400, 4800, 9600, 19200]
 
 
 def validate_request_format(value):
@@ -65,6 +70,8 @@ CONFIG_SCHEMA = cv.All(
                 cv.string, validate_meter_address
             ),
             cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
+            cv.Optional(CONF_BAUD_RATE_HANDSHAKE, default=9600): cv.one_of(*BAUD_RATES),
+            cv.Optional(CONF_BAUD_RATE, default=9600): cv.one_of(*BAUD_RATES),
             cv.Optional(
                 CONF_RECEIVE_TIMEOUT, default="500ms"
             ): cv.positive_time_period_milliseconds,
@@ -102,6 +109,7 @@ async def to_code(config):
         cg.add(var.set_indicator(sens))
 
     cg.add(var.set_meter_address(config[CONF_ADDRESS]))
+    cg.add(var.set_baud_rates(config[CONF_BAUD_RATE_HANDSHAKE], config[CONF_BAUD_RATE]))
     cg.add(var.set_receive_timeout_ms(config[CONF_RECEIVE_TIMEOUT]))
     cg.add(var.set_delay_between_requests_ms(config[CONF_DELAY_BETWEEN_REQUESTS]))
     cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))

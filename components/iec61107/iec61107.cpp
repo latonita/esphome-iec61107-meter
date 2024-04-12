@@ -19,9 +19,6 @@ static constexpr uint8_t CR = 0x0D;
 static constexpr uint8_t LF = 0x0A;
 static constexpr uint8_t NAK = 0x15;
 
-static constexpr uint16_t BAUD_BASE = 300;
-static constexpr uint8_t BAUD_MULT_MAX = 6;
-
 static const uint8_t CMD_ACK_SET_BAUD_AND_MODE[] = {ACK, '0', '5', '1', CR, LF};
 static const uint8_t CMD_CLOSE_SESSION[] = {SOH, 0x42, 0x30, ETX, 0x75};
 
@@ -84,7 +81,10 @@ static std::string format_frame_pretty(const uint8_t *data, size_t length) {
   return ss.str();
 }
 
-uint8_t baud_rate_to_code(uint32_t baud) {
+uint8_t baud_rate_to_byte(uint32_t baud) {
+  constexpr uint16_t BAUD_BASE = 300;
+  constexpr uint8_t BAUD_MULT_MAX = 6;
+
   uint8_t idx = 0;  // 300
   for (size_t i = 0; i <= BAUD_MULT_MAX; i++) {
     if (baud == BAUD_BASE * (1 << i)) {
@@ -116,7 +116,7 @@ void IEC61107Component::setup() {
   if (this->flow_control_pin_ != nullptr) {
     this->flow_control_pin_->setup();
   }
-
+  this->set_baud_rate_(this->baud_rate_handshake_);
   this->set_timeout(BOOT_WAIT_S * 1000, [this]() {
     ESP_LOGD(TAG, "Boot timeout, component is ready to use");
     this->clear_buffers_();
@@ -173,7 +173,7 @@ void IEC61107Component::loop() {
   if (!this->is_ready() || this->state_ == State::NOT_INITIALIZED)
     return;
   static uint32_t started_ms{0};
-
+  static uint8_t retry_counter = 0;
   static auto req_iterator = this->sensors_.end();
   static auto sens_iterator = this->sensors_.end();
 
@@ -182,6 +182,13 @@ void IEC61107Component::loop() {
     // shall we retry?
     if (this->state_ == State::DATA_RECV) {
       this->set_next_state_(State::DATA_FAIL);
+    } else if (this->state_ == State::ACK_START_GET_INFO) {
+      // waiting for baud to setlle ...
+      if (++retry_counter > 5) {
+        this->abort_mission_();
+      } else {
+        this->update_last_rx_time_();
+      }
     } else {
       this->abort_mission_();
       return;
@@ -208,8 +215,10 @@ void IEC61107Component::loop() {
       this->log_state_();
 
       this->clear_buffers_();
-      this->set_baud_rate_(9600);
-      delay(5);
+      if (this->are_baud_rates_different_()) {
+        this->set_baud_rate_(this->baud_rate_handshake_);
+        delay(5);
+      }
 
       uint8_t open_cmd[32]{0};
       uint8_t open_cmd_len = snprintf((char *) open_cmd, 32, "/?%s!\r\n", this->meter_address_.c_str());
@@ -229,20 +238,27 @@ void IEC61107Component::loop() {
           return;
         }
 
-        this->prepare_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
-        this->out_buf_[2] = '3'; //2400
-        this->send_frame_prepared_();
-        this->flush();
+        this->update_last_rx_time_();
+        if (this->are_baud_rates_different_()) {
+          this->prepare_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
 
-        //this->send_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
-        this->set_next_state_(State::SET_BAUD);
+          this->out_buf_[2] = baud_rate_to_byte(this->baud_rate_);  // set baud rate
+          this->send_frame_prepared_();
+          this->flush();
+          this->set_next_state_delayed_(250, State::SET_BAUD);
+
+        } else {
+          this->send_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
+        }
       }
       break;
 
     case State::SET_BAUD:
       this->log_state_();
-      this->set_baud_rate_(2400);
-      this->set_next_state_(State::ACK_START_GET_INFO);
+      this->update_last_rx_time_();
+      this->set_baud_rate_(this->baud_rate_);
+      retry_counter = 0;
+      this->set_next_state_delayed_(150, State::ACK_START_GET_INFO);
       break;
 
     case State::ACK_START_GET_INFO:
@@ -258,10 +274,9 @@ void IEC61107Component::loop() {
       }
 
       ESP_LOGD(TAG, "Meter address: %s", vals[0]);
- 
+
       this->set_next_state_(State::DATA_ENQ);
       break;
-
 
     case State::DATA_ENQ:
       this->log_state_();
