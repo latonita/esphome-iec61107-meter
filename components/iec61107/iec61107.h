@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart.h"
+#include "esphome/components/sensor/sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
 
 #include <cstdint>
@@ -45,6 +46,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
 
   void register_sensor(IEC61107SensorBase *sensor);
   void set_indicator(binary_sensor::BinarySensor *indicator) { this->indicator_ = indicator; }
+  void set_stat_err_crc(sensor::Sensor *sensor) { this->stat_err_crc_ = sensor; }
   void set_reboot_after_failure(uint16_t number_of_failures) {
     this->number_of_failures_before_reboot_ = number_of_failures;
   }
@@ -58,6 +60,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   std::unique_ptr<IEC61107UART> iuart_;
   SensorMap sensors_;
   binary_sensor::BinarySensor *indicator_{};
+  sensor::Sensor *stat_err_crc_{};
 
   enum class State : uint8_t {
     NOT_INITIALIZED,
@@ -83,6 +86,13 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   uint8_t number_of_failures_{0};
   uint8_t number_of_failures_before_reboot_{0};
 
+  uint32_t number_of_connections_tried_{0};
+  uint32_t number_of_crc_errors_{0};
+  uint32_t number_of_crc_errors_recovered_{0};
+  uint32_t number_of_invalid_frames_{0};
+
+  uint8_t retry_counter_{0};
+
   uint32_t baud_rate_handshake_{9600};
   uint32_t baud_rate_{9600};
 
@@ -106,6 +116,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   size_t receive_frame_(FrameStopFunction stop_fn);
   size_t receive_frame_ascii_();
   size_t receive_frame_r1_(uint8_t start_byte);
+  void retry_or_fail_(bool unclear = false);
 
   inline void update_last_rx_time_() { last_rx_time_ = millis(); }
   bool check_wait_timeout_() { return millis() - wait_start_time_ >= wait_period_ms_; }

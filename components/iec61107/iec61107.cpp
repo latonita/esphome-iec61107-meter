@@ -23,6 +23,7 @@ static const uint8_t CMD_ACK_SET_BAUD_AND_MODE[] = {ACK, '0', '5', '1', CR, LF};
 static const uint8_t CMD_CLOSE_SESSION[] = {SOH, 0x42, 0x30, ETX, 0x75};
 
 static constexpr uint8_t BOOT_WAIT_S = 10;
+static constexpr uint8_t MAX_TRIES_CRC = 3;
 
 static char empty_str[] = "";
 
@@ -143,7 +144,7 @@ void IEC61107Component::register_sensor(IEC61107SensorBase *sensor) {
 
 void IEC61107Component::abort_mission_() {
   // try close connection ?
-  ESP_LOGD(TAG, "Closing session");
+  ESP_LOGE(TAG, "Closing session");
   this->send_frame_(CMD_CLOSE_SESSION, sizeof(CMD_CLOSE_SESSION));
   this->set_next_state_(State::IDLE);
   this->report_failure(true);
@@ -169,6 +170,20 @@ void IEC61107Component::report_failure(bool set_or_clear) {
   }
 }
 
+void IEC61107Component::retry_or_fail_(bool unclear) {
+  this->number_of_crc_errors_++;
+  this->retry_counter_++;
+  if (this->retry_counter_ > MAX_TRIES_CRC) {
+    ESP_LOGE(TAG, "CRC error%s.", unclear ? " (unclear)" : "");
+    this->retry_counter_ = 0;
+    this->set_next_state_(State::DATA_FAIL);
+  } else {
+    ESP_LOGW(TAG, "CRC error%s. Retrying [%d/3]...", unclear ? " (unclear)" : "", this->retry_counter_);
+    this->update_last_rx_time_();
+    this->set_next_state_(State::DATA_ENQ);
+  }
+}
+
 void IEC61107Component::loop() {
   if (!this->is_ready() || this->state_ == State::NOT_INITIALIZED)
     return;
@@ -178,10 +193,16 @@ void IEC61107Component::loop() {
   static auto sens_iterator = this->sensors_.end();
 
   if (!this->is_idling() && this->check_rx_timeout_()) {
-    ESP_LOGE(TAG, "No transmission from the meter.");
+    ESP_LOGW(TAG, "RX timeout.");
     // shall we retry?
     if (this->state_ == State::DATA_RECV) {
-      this->set_next_state_(State::DATA_FAIL);
+      if (data_in_size_ > 0) {
+        // most likely its CRC error in STX/SOH/ETX. unclear.
+        ESP_LOGV(TAG, "RX: %s", format_frame_pretty(in_buf_, data_in_size_).c_str());
+        ESP_LOGVV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
+      }
+      this->clear_buffers_();
+      this->retry_or_fail_(true);
     } else if (this->state_ == State::ACK_START_GET_INFO) {
       // waiting for baud to setlle ...
       if (++retry_counter > 5) {
@@ -211,6 +232,7 @@ void IEC61107Component::loop() {
       break;
 
     case State::OPEN_SESSION: {
+      this->number_of_connections_tried_++;
       started_ms = millis();
       this->log_state_();
 
@@ -234,6 +256,7 @@ void IEC61107Component::loop() {
         char *meter_id = this->extract_meter_id_(frame_size);
         if (meter_id == nullptr) {
           ESP_LOGE(TAG, "Invalid meter identification frame");
+          this->number_of_invalid_frames_++;
           this->abort_mission_();
           return;
         }
@@ -249,6 +272,7 @@ void IEC61107Component::loop() {
 
         } else {
           this->send_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
+          this->set_next_state_(State::SET_BAUD);
         }
       }
       break;
@@ -269,12 +293,13 @@ void IEC61107Component::loop() {
 
       if (!get_values_from_brackets_(in_buf_param_name, vals)) {
         ESP_LOGE(TAG, "Invalid frame format: '%s'", in_buf_param_name);
+        this->number_of_invalid_frames_++;
         this->abort_mission_();
         return;
       }
 
       ESP_LOGD(TAG, "Meter address: %s", vals[0]);
-
+      this->retry_counter_ = 0;
       this->set_next_state_(State::DATA_ENQ);
       break;
 
@@ -306,12 +331,17 @@ void IEC61107Component::loop() {
 
         uint8_t bcc = this->calculate_crc_frame_r1_(in_buf_, frame_size);
         if (bcc != in_buf_[frame_size - 1]) {
-          ESP_LOGE(TAG, "BCC error. Skipping data packet.");
+          this->retry_or_fail_();
           return;
         }
+        if (this->retry_counter_ > 0) {
+          this->number_of_crc_errors_recovered_ += this->retry_counter_;
+        }
+        this->retry_counter_ = 0;
         uint8_t brackets_found = get_values_from_brackets_(in_buf_param_name, vals);
         if (!brackets_found) {
           ESP_LOGE(TAG, "Invalid frame format: '%s'", in_buf_param_name);
+          this->number_of_invalid_frames_++;
           return;
         }
 
@@ -345,7 +375,7 @@ void IEC61107Component::loop() {
 
     case State::DATA_FAIL:
       this->log_state_();
-      printf("\nResponse not received or corrupted. Next.");
+      ESP_LOGD(TAG, "Response not received or corrupted. Next.");
       this->update_last_rx_time_();
       this->clear_buffers_();
       this->set_next_state_(State::DATA_NEXT);
@@ -379,9 +409,21 @@ void IEC61107Component::loop() {
         sens_iterator->second->publish();
         sens_iterator++;
       } else {
+        float crc_err_per_session = (float) this->number_of_crc_errors_ / this->number_of_connections_tried_;
+        ESP_LOGD(TAG, ".........................................");
         ESP_LOGD(TAG, "Data collection and publishing finished.");
-        ESP_LOGD(TAG, "Total time: %u ms", millis() - started_ms);
+        ESP_LOGD(TAG, "Total time ........................... %u ms", millis() - started_ms);
+        ESP_LOGD(TAG, "Total number of sessions ............. %u", this->number_of_connections_tried_);
+        ESP_LOGD(TAG, "Total number of invalid frames ....... %u", this->number_of_invalid_frames_);
+        ESP_LOGD(TAG, "Total number of CRC errors ........... %u", this->number_of_crc_errors_);
+        ESP_LOGD(TAG, "Total number of CRC errors recovered . %u", this->number_of_crc_errors_recovered_);
+        ESP_LOGD(TAG, "CRC errors per session ............... %f", crc_err_per_session);
+        ESP_LOGD(TAG, "Number of failures ................... %u", this->number_of_failures_);
+        ESP_LOGD(TAG, ".........................................");
 
+        if (this->stat_err_crc_ != nullptr) {
+          this->stat_err_crc_->publish_state(crc_err_per_session);
+        }
         this->report_failure(false);
         this->set_next_state_(State::IDLE);
       }
@@ -515,6 +557,10 @@ size_t IEC61107Component::receive_frame_(FrameStopFunction stop_fn) {
       }
     }
 
+    // if (data_in_size_ > 0) {
+    //   ESP_LOGVV(TAG, "RX[%02d] = 0x%02x", data_in_size_ - 1, in_buf_[data_in_size_ - 1]);
+    // }
+
     if (stop_fn(in_buf_, data_in_size_)) {
       ESP_LOGV(TAG, "RX: %s", format_frame_pretty(in_buf_, data_in_size_).c_str());
       ESP_LOGVV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
@@ -522,9 +568,6 @@ size_t IEC61107Component::receive_frame_(FrameStopFunction stop_fn) {
       data_in_size_ = 0;
       this->update_last_rx_time_();
       return ret_val;
-    }
-    if (data_in_size_ > 0) {
-      ESP_LOGVV(TAG, "RX_BYTE[%02d]: 0x%02x", data_in_size_, in_buf_[data_in_size_ - 1]);
     }
     yield();
     App.feed_wdt();
@@ -534,13 +577,27 @@ size_t IEC61107Component::receive_frame_(FrameStopFunction stop_fn) {
 
 size_t IEC61107Component::receive_frame_ascii_() {
   // "data<CR><LF>"
-  auto frame_end_crlf = [](uint8_t *b, size_t s) { return s >= 2 && b[s - 1] == '\n' && b[s - 2] == '\r'; };
+  //  ESP_LOGVV(TAG, "Waiting for ASCII frame");
+  auto frame_end_crlf = [](uint8_t *b, size_t s) {
+    auto ret = s >= 2 && b[s - 1] == '\n' && b[s - 2] == '\r';
+    if (ret) {
+      ESP_LOGVV(TAG, "Frame CRLF Stop");
+    }
+    return ret;
+  };
   return receive_frame_(frame_end_crlf);
 }
 
 size_t IEC61107Component::receive_frame_r1_(uint8_t start_byte) {
   // "<start_byte>data<ETX><BCC>"
-  auto frame_end_iec = [start_byte](uint8_t *b, size_t s) { return (s > 3 && b[0] == start_byte && b[s - 2] == ETX); };
+  //  ESP_LOGVV(TAG, "Waiting for R1 frame, start byte: 0x%02x", start_byte);
+  auto frame_end_iec = [start_byte](uint8_t *b, size_t s) {
+    auto ret = (s > 3 && b[0] == start_byte && b[s - 2] == ETX);
+    if (ret) {
+      ESP_LOGVV(TAG, "Frame R1 Stop");
+    }
+    return ret;
+  };
   return receive_frame_(frame_end_iec);
 }
 
@@ -663,7 +720,7 @@ void IEC61107Component::log_state_() {
   }
 
   if (state_ != last_reported_state) {
-    ESP_LOGV(TAG, "%s", state_txt);
+    ESP_LOGV(TAG, "State::%s", state_txt);
     last_reported_state = state_;
   }
 }

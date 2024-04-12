@@ -16,7 +16,7 @@ from esphome.const import (
 
 CODEOWNERS = ["@latonita"]
 
-AUTO_LOAD = ["sensor", "binary_sensor"]
+AUTO_LOAD = ["binary_sensor"]
 
 DEPENDENCIES = ["uart"]
 
@@ -30,6 +30,7 @@ CONF_INDICATOR = "indicator"
 CONF_REBOOT_AFTER_FAILURE = "reboot_after_failure"
 
 CONF_BAUD_RATE_HANDSHAKE = "baud_rate_handshake"
+# CONF_STAT_ERR_CRC = "stat_err_crc"
 
 iec61107_ns = cg.esphome_ns.namespace("iec61107")
 IEC61107Component = iec61107_ns.class_(
@@ -86,6 +87,10 @@ CONFIG_SCHEMA = cv.All(
                 device_class=DEVICE_CLASS_PROBLEM,
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             ),
+            # cv.Optional(CONF_STAT_ERR_CRC): sensor.sensor_schema(
+            #     entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            #     accuracy_decimals=2,
+            # ),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -102,11 +107,25 @@ async def to_code(config):
         pin = await cg.gpio_pin_expression(config[CONF_FLOW_CONTROL_PIN])
         cg.add(var.set_flow_control_pin(pin))
 
-    if CONF_INDICATOR in config:
-        conf = config[CONF_INDICATOR]
-        sens = cg.new_Pvariable(conf[CONF_ID])
-        await binary_sensor.register_binary_sensor(sens, conf)
+    # if stat_config := config.get(CONF_STAT_ERR_CRC):
+    #     sens = await sensor.new_sensor(stat_config)
+    #     cg.add(var.set_stat_err_crc(sens))
+
+    if indicator_config := config.get(CONF_INDICATOR):
+        sens = cg.new_Pvariable(indicator_config[CONF_ID])
+        await binary_sensor.register_binary_sensor(sens, indicator_config)
         cg.add(var.set_indicator(sens))
+
+    # if err_stat_config := config.get(CONF_STAT_ERR_CRC):
+    #     sens = cg.new_Pvariable(err_stat_config[CONF_ID])
+    #     await sensor.register_sensor(sens, err_stat_config)
+    #     cg.add(var.set_stat_err_crc(sens))
+
+    # if CONF_INDICATOR in config:
+    #     conf = config[CONF_INDICATOR]
+    #     sens = cg.new_Pvariable(conf[CONF_ID])
+    #     await binary_sensor.register_binary_sensor(sens, conf)
+    #     cg.add(var.set_indicator(sens))
 
     cg.add(var.set_meter_address(config[CONF_ADDRESS]))
     cg.add(var.set_baud_rates(config[CONF_BAUD_RATE_HANDSHAKE], config[CONF_BAUD_RATE]))
