@@ -82,6 +82,13 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
 
   uint8_t number_of_failures_{0};
   uint8_t number_of_failures_before_reboot_{0};
+  
+  uint32_t number_of_connections_tried_{0};
+  uint32_t number_of_crc_errors_{0};
+  uint32_t number_of_crc_errors_recovered_{0};
+  uint32_t number_of_invalid_frames_{0};
+
+  uint8_t retry_counter_{0};
 
   uint32_t baud_rate_handshake_{9600};
   uint32_t baud_rate_{9600};
@@ -106,6 +113,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   size_t receive_frame_(FrameStopFunction stop_fn);
   size_t receive_frame_ascii_();
   size_t receive_frame_r1_(uint8_t start_byte);
+  void retry_or_fail_(bool unclear = false);
 
   inline void update_last_rx_time_() { last_rx_time_ = millis(); }
   bool check_wait_timeout_() { return millis() - wait_start_time_ >= wait_period_ms_; }
