@@ -345,8 +345,9 @@ void IEC61107Component::loop() {
 
     case State::DATA_FAIL:
       this->log_state_();
-      printf("\nResponse not received. Next.");
+      printf("\nResponse not received or corrupted. Next.");
       this->update_last_rx_time_();
+      this->clear_buffers_();
       this->set_next_state_(State::DATA_NEXT);
       break;
 
@@ -521,6 +522,9 @@ size_t IEC61107Component::receive_frame_(FrameStopFunction stop_fn) {
       data_in_size_ = 0;
       this->update_last_rx_time_();
       return ret_val;
+    }
+    if (data_in_size_ > 0) {
+      ESP_LOGVV(TAG, "RX_BYTE[%02d]: 0x%02x", data_in_size_, in_buf_[data_in_size_ - 1]);
     }
     yield();
     App.feed_wdt();
