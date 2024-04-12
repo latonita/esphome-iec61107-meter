@@ -60,6 +60,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
     WAIT,
     OPEN_SESSION,
     OPEN_SESSION_GET_ID,
+    SET_BAUD,
     ACK_START_GET_INFO,
     DATA_ENQ,
     DATA_RECV,
@@ -77,6 +78,8 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   uint8_t number_of_failures_{0};
   uint8_t number_of_failures_before_reboot_{0};
 
+  uint32_t baud_rate_{9600};
+
   uint32_t last_rx_time_{0};
   uint32_t wait_start_time_;
   uint32_t wait_period_ms_;
@@ -87,6 +90,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   size_t data_out_size_;
 
   void clear_buffers_();
+  void set_baud_rate_(uint32_t baud_rate);
 
   uint8_t calculate_crc_frame_r1_(const uint8_t *data, size_t length);
   void prepare_frame_(const uint8_t *data, size_t length);

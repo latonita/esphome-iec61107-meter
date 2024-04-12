@@ -19,6 +19,9 @@ static constexpr uint8_t CR = 0x0D;
 static constexpr uint8_t LF = 0x0A;
 static constexpr uint8_t NAK = 0x15;
 
+static constexpr uint16_t BAUD_BASE = 300;
+static constexpr uint8_t BAUD_MULT_MAX = 6;
+
 static const uint8_t CMD_ACK_SET_BAUD_AND_MODE[] = {ACK, '0', '5', '1', CR, LF};
 static const uint8_t CMD_CLOSE_SESSION[] = {SOH, 0x42, 0x30, ETX, 0x75};
 
@@ -79,6 +82,22 @@ static std::string format_frame_pretty(const uint8_t *data, size_t length) {
   if (length > 4)
     ss << " (" << length << ")";
   return ss.str();
+}
+
+uint8_t baud_rate_to_code(uint32_t baud) {
+  uint8_t idx = 0;  // 300
+  for (size_t i = 0; i <= BAUD_MULT_MAX; i++) {
+    if (baud == BAUD_BASE * (1 << i)) {
+      idx = i;
+      break;
+    }
+  }
+  return idx + '0';
+}
+
+void IEC61107Component::set_baud_rate_(uint32_t baud_rate) {
+  ESP_LOGV(TAG, "Setting baud rate %u bps", baud_rate);
+  iuart_->update_baudrate(baud_rate);
 }
 
 void IEC61107Component::setup() {
@@ -187,7 +206,11 @@ void IEC61107Component::loop() {
     case State::OPEN_SESSION: {
       started_ms = millis();
       this->log_state_();
+
       this->clear_buffers_();
+      this->set_baud_rate_(9600);
+      delay(5);
+
       uint8_t open_cmd[32]{0};
       uint8_t open_cmd_len = snprintf((char *) open_cmd, 32, "/?%s!\r\n", this->meter_address_.c_str());
       this->send_frame_(open_cmd, open_cmd_len);
@@ -206,9 +229,20 @@ void IEC61107Component::loop() {
           return;
         }
 
-        this->send_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
-        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::ACK_START_GET_INFO);
+        this->prepare_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
+        this->out_buf_[2] = '3'; //2400
+        this->send_frame_prepared_();
+        this->flush();
+
+        //this->send_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
+        this->set_next_state_(State::SET_BAUD);
       }
+      break;
+
+    case State::SET_BAUD:
+      this->log_state_();
+      this->set_baud_rate_(2400);
+      this->set_next_state_(State::ACK_START_GET_INFO);
       break;
 
     case State::ACK_START_GET_INFO:
@@ -224,9 +258,10 @@ void IEC61107Component::loop() {
       }
 
       ESP_LOGD(TAG, "Meter address: %s", vals[0]);
-
+ 
       this->set_next_state_(State::DATA_ENQ);
       break;
+
 
     case State::DATA_ENQ:
       this->log_state_();
@@ -578,6 +613,9 @@ void IEC61107Component::log_state_() {
       break;
     case State::OPEN_SESSION_GET_ID:
       state_txt = "OPEN_SESSION_GET_ID";
+      break;
+    case State::SET_BAUD:
+      state_txt = "SET_BAUD";
       break;
     case State::ACK_START_GET_INFO:
       state_txt = "ACK_START_GET_INFO";
