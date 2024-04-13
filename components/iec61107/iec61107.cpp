@@ -272,7 +272,7 @@ void IEC61107Component::loop() {
 
         } else {
           this->send_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
-          this->set_next_state_(State::SET_BAUD);
+          this->set_next_state_(State::ACK_START_GET_INFO);
         }
       }
       break;
