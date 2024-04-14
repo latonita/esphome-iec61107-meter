@@ -25,6 +25,8 @@ using ValueRefsArray = std::array<const char *, VAL_NUM>;
 using SensorMap = std::multimap<std::string, IEC61107SensorBase *>;
 using FrameStopFunction = std::function<bool(uint8_t *buf, size_t size)>;
 
+using ReadFunction = std::function<size_t()>;
+
 class IEC61107Component : public PollingComponent, public uart::UARTDevice {
  public:
   IEC61107Component() = default;
@@ -66,6 +68,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
     NOT_INITIALIZED,
     IDLE,
     WAIT,
+    READING_DATA,
     OPEN_SESSION,
     OPEN_SESSION_GET_ID,
     SET_BAUD,
@@ -79,9 +82,26 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   } state_{State::NOT_INITIALIZED}, next_state_after_wait_{State::IDLE};
 
   bool is_idling() const { return this->state_ == State::WAIT || this->state_ == State::IDLE; };
+
   void set_next_state_(State next_state) { state_ = next_state; };
   void set_next_state_delayed_(uint32_t ms, State next_state);
-  void log_state_();
+
+  void read_and_set_next_state_(ReadFunction read_fn, State next_state, bool mission_critical, uint8_t retries,
+                                bool check_crc);
+  //  void read_and_set_next_state_(ReadFunction read_fn, State next_state, bool mission_critical, uint8_t retries = 0,
+  //  bool check_crc = false);
+  struct {
+    ReadFunction read_fn;
+    State next_state;
+    bool mission_critical;
+    bool check_crc;
+    uint8_t tries_max;
+    uint8_t tries_counter;
+  } reading_state_{nullptr, State::IDLE, false, false, 0, 0};
+
+  const char *state_to_string(State state);
+  void log_state_(State *next_state = nullptr);
+
 
   uint8_t number_of_failures_{0};
   uint8_t number_of_failures_before_reboot_{0};
@@ -105,10 +125,11 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   uint8_t out_buf_[MAX_OUT_BUF_SIZE];
   size_t data_out_size_;
 
-  void clear_buffers_();
+  void clear_rx_buffers_();
   void set_baud_rate_(uint32_t baud_rate);
   bool are_baud_rates_different_() const { return baud_rate_handshake_ != baud_rate_; }
   uint8_t calculate_crc_frame_r1_(const uint8_t *data, size_t length);
+  bool check_crc_frame_r1_(const uint8_t *data, size_t length);
   void prepare_frame_(const uint8_t *data, size_t length);
   void prepare_frame_r1_(const char *request);
   void send_frame_(const uint8_t *data, size_t length);
