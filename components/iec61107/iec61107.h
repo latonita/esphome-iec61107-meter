@@ -23,8 +23,8 @@ const uint8_t VAL_NUM = 12;
 using ValueRefsArray = std::array<const char *, VAL_NUM>;
 
 using SensorMap = std::multimap<std::string, IEC61107SensorBase *>;
-using FrameStopFunction = std::function<bool(uint8_t *buf, size_t size)>;
 
+using FrameStopFunction = std::function<bool(uint8_t *buf, size_t size)>;
 using ReadFunction = std::function<size_t()>;
 
 class IEC61107Component : public PollingComponent, public uart::UARTDevice {
@@ -86,10 +86,8 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   void set_next_state_(State next_state) { state_ = next_state; };
   void set_next_state_delayed_(uint32_t ms, State next_state);
 
-  void read_and_set_next_state_(ReadFunction read_fn, State next_state, bool mission_critical, uint8_t retries,
+  void read_and_set_next_state_(ReadFunction read_fn, State next_state, uint8_t retries, bool mission_critical, 
                                 bool check_crc);
-  //  void read_and_set_next_state_(ReadFunction read_fn, State next_state, bool mission_critical, uint8_t retries = 0,
-  //  bool check_crc = false);
   struct {
     ReadFunction read_fn;
     State next_state;
@@ -97,11 +95,12 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
     bool check_crc;
     uint8_t tries_max;
     uint8_t tries_counter;
-  } reading_state_{nullptr, State::IDLE, false, false, 0, 0};
+    uint32_t err_crc;
+    uint32_t err_invalid_frames;
+  } reading_state_{nullptr, State::IDLE, false, false, 0, 0, 0, 0};
 
   const char *state_to_string(State state);
   void log_state_(State *next_state = nullptr);
-
 
   uint8_t number_of_failures_{0};
   uint8_t number_of_failures_before_reboot_{0};
@@ -128,15 +127,15 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   void clear_rx_buffers_();
   void set_baud_rate_(uint32_t baud_rate);
   bool are_baud_rates_different_() const { return baud_rate_handshake_ != baud_rate_; }
-  uint8_t calculate_crc_frame_r1_(const uint8_t *data, size_t length);
-  bool check_crc_frame_r1_(const uint8_t *data, size_t length);
+  uint8_t calculate_crc_prog_frame_(const uint8_t *data, size_t length);
+  bool check_crc_prog_frame_(const uint8_t *data, size_t length);
   void prepare_frame_(const uint8_t *data, size_t length);
-  void prepare_frame_r1_(const char *request);
+  void prepare_prog_frame_(const char *request);
   void send_frame_(const uint8_t *data, size_t length);
   void send_frame_prepared_();
   size_t receive_frame_(FrameStopFunction stop_fn);
   size_t receive_frame_ascii_();
-  size_t receive_frame_r1_(uint8_t start_byte);
+  size_t receive_prog_frame_(uint8_t start_byte);
   void retry_or_fail_(bool unclear = false);
 
   inline void update_last_rx_time_() { last_rx_time_ = millis(); }
