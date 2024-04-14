@@ -170,19 +170,19 @@ void IEC61107Component::report_failure(bool set_or_clear) {
   }
 }
 
-void IEC61107Component::retry_or_fail_(bool unclear) {
-  this->number_of_crc_errors_++;
-  this->retry_counter_++;
-  if (this->retry_counter_ > MAX_TRIES_CRC) {
-    ESP_LOGE(TAG, "CRC error%s.", unclear ? " (unclear)" : "");
-    this->retry_counter_ = 0;
-    this->set_next_state_(State::DATA_FAIL);
-  } else {
-    ESP_LOGW(TAG, "CRC error%s. Retrying [%d/3]...", unclear ? " (unclear)" : "", this->retry_counter_);
-    this->update_last_rx_time_();
-    this->set_next_state_(State::DATA_ENQ);
-  }
-}
+// void IEC61107Component::retry_or_fail_(bool unclear) {
+//   this->number_of_crc_errors_++;
+//   this->retry_counter_++;
+//   if (this->retry_counter_ > MAX_TRIES_CRC) {
+//     ESP_LOGE(TAG, "CRC error%s.", unclear ? " (unclear)" : "");
+//     this->retry_counter_ = 0;
+//     this->set_next_state_(State::DATA_FAIL);
+//   } else {
+//     ESP_LOGW(TAG, "CRC error%s. Retrying [%d/3]...", unclear ? " (unclear)" : "", this->retry_counter_);
+//     this->update_last_rx_time_();
+//     this->set_next_state_(State::DATA_ENQ);
+//   }
+// }
 
 void IEC61107Component::loop() {
   if (!this->is_ready() || this->state_ == State::NOT_INITIALIZED)
@@ -222,6 +222,16 @@ void IEC61107Component::loop() {
   switch (this->state_) {
     case State::IDLE:
       this->update_last_rx_time_();
+
+      if (!this->single_requests_.empty()) {
+        auto request = this->single_requests_.front();
+        this->single_requests_.pop_front();
+        ESP_LOGD(TAG, "Performing single read for '%s'", request.c_str());
+        this->prepare_non_session_prog_frame_(request.c_str());
+        this->send_frame_prepared_();
+        auto read_fn = [this]() { return this->receive_prog_frame_(STX); };
+        this->read_and_set_next_state_(read_fn, State::SINGLE_READ_ACK, 3, false, true);
+      }
       break;
 
     case State::WAIT:
@@ -317,8 +327,8 @@ void IEC61107Component::loop() {
       req_iterator = this->sensors_.begin();
       this->send_frame_(open_cmd, open_cmd_len);
       this->set_next_state_(State::OPEN_SESSION_GET_ID);
-      this->read_and_set_next_state_([this]() { return this->receive_frame_ascii_(); }, State::OPEN_SESSION_GET_ID, 0,
-                                     true, false);
+      auto read_fn = [this]() { return this->receive_frame_ascii_(); };
+      this->read_and_set_next_state_(read_fn, State::OPEN_SESSION_GET_ID, 0, true, false);
 
     } break;
 
@@ -394,7 +404,6 @@ void IEC61107Component::loop() {
         ESP_LOGD(TAG, "Requesting data for '%s'", req.c_str());
         this->prepare_prog_frame_(req.c_str());
         this->send_frame_prepared_();
-        //        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_RECV);
         auto read_fn = [this]() { return this->receive_prog_frame_(STX); };
         this->read_and_set_next_state_(read_fn, State::DATA_RECV, 3, false, true);
       }
@@ -502,6 +511,16 @@ void IEC61107Component::loop() {
       }
       break;
 
+    case State::SINGLE_READ_ACK: {
+      this->log_state_();
+      if (frame_size) {
+        ESP_LOGD(TAG, "Single read frame received");
+      } else {
+        ESP_LOGE(TAG, "Failed to make single read call");
+      }
+      this->set_next_state_(State::IDLE);
+    } break;
+
     default:
       break;
   }
@@ -514,6 +533,11 @@ void IEC61107Component::update() {
   }
   ESP_LOGD(TAG, "Starting data collection");
   this->set_next_state_(State::OPEN_SESSION);
+}
+
+void IEC61107Component::queue_single_read(const std::string &request) {
+  ESP_LOGD(TAG, "Queueing single read for '%s'", request.c_str());
+  this->single_requests_.push_back(request);
 }
 
 bool char2float(const char *str, float &value) {
@@ -590,7 +614,21 @@ void IEC61107Component::read_and_set_next_state_(ReadFunction read_fn, State nex
 void IEC61107Component::prepare_prog_frame_(const char *request) {
   // we assume request has format "XXXX(params)"
   // we assume it always has brackets
-  data_out_size_ = 1 + snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "\x01R1\x02%s\x03", request);
+  data_out_size_ = snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "%cR1%c%s%c\xFF", SOH, STX, request, ETX);
+  //  data_out_size_ = snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "\x01R1\x02%s\x03\xFF", request);
+  uint8_t bcc = this->calculate_crc_prog_frame_(out_buf_, data_out_size_);
+  out_buf_[data_out_size_ - 1] = bcc;
+}
+
+void IEC61107Component::prepare_non_session_prog_frame_(const char *request) {
+  // we assume request has format "XXXX(params)"
+  // we assume it always has brackets
+
+  // "/?!<SOH>R1<STX>NAME()<ETX><BCC>" broadcast
+  // "/?<address>!<SOH>R1<STX>NAME()<ETX><BCC>" direct
+
+  data_out_size_ = snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "/?%s!%cR1%c%s%c\xFF", this->meter_address_.c_str(),
+                            SOH, STX, request, ETX);
   uint8_t bcc = this->calculate_crc_prog_frame_(out_buf_, data_out_size_);
   out_buf_[data_out_size_ - 1] = bcc;
 }
@@ -621,7 +659,7 @@ void IEC61107Component::send_frame_(const uint8_t *data, size_t length) {
 size_t IEC61107Component::receive_frame_(FrameStopFunction stop_fn) {
   const uint32_t read_time_limit_ms = 25;
   size_t ret_val;
-  
+
   auto count = this->available();
   if (count <= 0)
     return 0;
@@ -785,6 +823,8 @@ const char *IEC61107Component::state_to_string(State state) {
       return "CLOSE_SESSION";
     case State::PUBLISH:
       return "PUBLISH";
+    case State::SINGLE_READ_ACK:
+      return "SINGLE_READ_ACK";
     default:
       return "UNKNOWN";
   }
