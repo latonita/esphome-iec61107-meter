@@ -5,6 +5,10 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
 
+#ifdef USE_TIME
+#include "esphome/components/time/real_time_clock.h"
+#endif
+
 #include <cstdint>
 #include <string>
 #include <memory>
@@ -48,6 +52,10 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   void set_delay_between_requests_ms(uint32_t delay) { this->delay_between_requests_ms_ = delay; };
   void set_flow_control_pin(GPIOPin *flow_control_pin) { this->flow_control_pin_ = flow_control_pin; };
 
+#ifdef USE_TIME
+  void set_time(time::RealTimeClock *srctime) { this->time_ = srctime; };
+#endif
+
   void register_sensor(IEC61107SensorBase *sensor);
   void set_indicator(binary_sensor::BinarySensor *indicator) { this->indicator_ = indicator; }
   void set_reboot_after_failure(uint16_t number_of_failures) {
@@ -55,6 +63,8 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   }
 
   void queue_single_read(const std::string &req);
+  void queue_single_write(const std::string &req);
+  void queue_time_sync() { this->time_sync_request_ = true; }
 
  protected:
   std::string meter_address_{""};
@@ -63,10 +73,12 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
 
   GPIOPin *flow_control_pin_{nullptr};
   std::unique_ptr<IEC61107UART> iuart_;
+  time::RealTimeClock *time_{nullptr};
 
   SensorMap sensors_;
   SingleRequests single_requests_;
-  
+  bool time_sync_request_{false};
+
   binary_sensor::BinarySensor *indicator_{};
   sensor::Sensor *stat_err_crc_{};
 
@@ -87,6 +99,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
     PUBLISH,
     SINGLE_READ,
     SINGLE_READ_ACK,
+    TIME_SYNC_ACK,
   } state_{State::NOT_INITIALIZED}, next_state_after_wait_{State::IDLE};
 
   bool is_idling() const { return this->state_ == State::WAIT || this->state_ == State::IDLE; };
@@ -141,14 +154,14 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
 
   void prepare_frame_(const uint8_t *data, size_t length);
   void prepare_prog_frame_(const char *request);
-  void prepare_non_session_prog_frame_(const char *request);
+  void prepare_non_session_prog_frame_(const char *request, bool write = false);
 
   void send_frame_(const uint8_t *data, size_t length);
   void send_frame_prepared_();
 
   size_t receive_frame_(FrameStopFunction stop_fn);
   size_t receive_frame_ascii_();
-  size_t receive_prog_frame_(uint8_t start_byte);
+  size_t receive_prog_frame_(uint8_t start_byte, bool accept_ack_and_nack = false);
 
   void retry_or_fail_(bool unclear = false);
 
@@ -163,6 +176,9 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
 
   void report_failure(bool set_or_clear);
   void abort_mission_();
+
+  bool prepare_time_sync_frame_();
+  void print_time_();
 };
 
 }  // namespace iec61107

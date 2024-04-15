@@ -2,7 +2,7 @@ import re
 from esphome import pins
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import uart, binary_sensor
+from esphome.components import uart, binary_sensor, time
 from esphome.const import (
     CONF_ID,
     CONF_ADDRESS,
@@ -10,6 +10,7 @@ from esphome.const import (
     CONF_RECEIVE_TIMEOUT,
     CONF_UPDATE_INTERVAL,
     CONF_FLOW_CONTROL_PIN,
+    CONF_TIME_ID,
     DEVICE_CLASS_PROBLEM,
     ENTITY_CATEGORY_DIAGNOSTIC,
 )
@@ -67,6 +68,7 @@ CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(IEC61107Component),
+            cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
             cv.Optional(CONF_ADDRESS, default=""): cv.All(
                 cv.string, validate_meter_address
             ),
@@ -133,3 +135,7 @@ async def to_code(config):
     cg.add(var.set_delay_between_requests_ms(config[CONF_DELAY_BETWEEN_REQUESTS]))
     cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
     cg.add(var.set_reboot_after_failure(config[CONF_REBOOT_AFTER_FAILURE]))
+
+    if CONF_TIME_ID in config:
+        time_ = await cg.get_variable(config[CONF_TIME_ID])
+        cg.add(var.set_time(time_))

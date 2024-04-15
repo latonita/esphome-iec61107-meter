@@ -192,47 +192,39 @@ void IEC61107Component::loop() {
   static auto req_iterator = this->sensors_.end();
   static auto sens_iterator = this->sensors_.end();
 
-  // if (!this->is_idling() && this->check_rx_timeout_()) {
-  //   ESP_LOGW(TAG, "RX timeout.");
-  //   // shall we retry?
-  //   if (this->state_ == State::DATA_RECV) {
-  //     if (data_in_size_ > 0) {
-  //       // most likely its CRC error in STX/SOH/ETX. unclear.
-  //       ESP_LOGV(TAG, "RX: %s", format_frame_pretty(in_buf_, data_in_size_).c_str());
-  //       ESP_LOGVV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
-  //     }
-  //     this->clear_buffers_();
-  //     this->retry_or_fail_(true);
-  //   } else if (this->state_ == State::ACK_START_GET_INFO) {
-  //     // waiting for baud to setlle ...
-  //     if (++retry_counter > 5) {
-  //       this->abort_mission_();
-  //     } else {
-  //       this->update_last_rx_time_();
-  //     }
-  //   } else {
-  //     this->abort_mission_();
-  //     return;
-  //   }
-  // }
   char *in_buf_param_name = (char *) &in_buf_[1];  // skip first byte which is STX/SOH in R1 requests
   static ValueRefsArray vals;
   static size_t frame_size{0};
 
   switch (this->state_) {
-    case State::IDLE:
+    case State::IDLE: {
       this->update_last_rx_time_();
+      auto request = this->single_requests_.front();
 
       if (!this->single_requests_.empty()) {
-        auto request = this->single_requests_.front();
         this->single_requests_.pop_front();
-        ESP_LOGD(TAG, "Performing single read for '%s'", request.c_str());
-        this->prepare_non_session_prog_frame_(request.c_str());
-        this->send_frame_prepared_();
-        auto read_fn = [this]() { return this->receive_prog_frame_(STX); };
-        this->read_and_set_next_state_(read_fn, State::SINGLE_READ_ACK, 3, false, true);
+        if (request.find("CTIME") == 0) {
+          this->time_sync_request_ = true;
+        } else {
+          ESP_LOGD(TAG, "Performing single read for '%s'", request.c_str());
+          this->prepare_non_session_prog_frame_(request.c_str());
+          this->send_frame_prepared_();
+          auto read_fn = [this]() { return this->receive_prog_frame_(STX, true); };
+          this->read_and_set_next_state_(read_fn, State::SINGLE_READ_ACK, 3, false, true);
+        }
       }
-      break;
+
+      if (this->time_sync_request_) {
+        this->time_sync_request_ = false;
+        ESP_LOGD(TAG, "Performing time sync");
+        this->prepare_non_session_prog_frame_(request.c_str(), true);
+
+        //      if (this->prepare_time_sync_frame_()) {
+        auto read_fn = [this]() { return this->receive_prog_frame_(STX, true); };
+        this->read_and_set_next_state_(read_fn, State::TIME_SYNC_ACK, 3, false, true);
+        //        };
+      }
+    } break;
 
     case State::WAIT:
       if (this->check_wait_timeout_()) {
@@ -421,6 +413,10 @@ void IEC61107Component::loop() {
       auto req = req_iterator->first;
       //      ESP_LOGD(TAG, "Data received for '%s'", req.c_str());
 
+      if (req_iterator->second->get_function() == "TIME_") {
+        this->print_time_();
+      }
+
       uint8_t brackets_found = get_values_from_brackets_(in_buf_param_name, vals);
       if (!brackets_found) {
         ESP_LOGE(TAG, "Invalid frame format: '%s'", in_buf_param_name);
@@ -517,6 +513,23 @@ void IEC61107Component::loop() {
         ESP_LOGD(TAG, "Single read frame received");
       } else {
         ESP_LOGE(TAG, "Failed to make single read call");
+      }
+      this->set_next_state_(State::IDLE);
+    } break;
+
+    case State::TIME_SYNC_ACK: {
+      this->log_state_();
+      if (frame_size == 1 && in_buf_[0] == ACK) {
+        ESP_LOGD(TAG, "Time sync successful");
+      } else if (frame_size == 1 && in_buf_[0] == NAK) {
+        ESP_LOGE(TAG, "Time sync rejected. Obey 24h rule.");
+      } else if (frame_size >= 5) {
+        // <STX>(ERR12)<ETX>  (10)
+        in_buf_[frame_size - 2] = '\0';
+        uint8_t *str = in_buf_ + 1;
+        ESP_LOGE(TAG, "Time sync error returned. %s", str);
+      } else {
+        ESP_LOGE(TAG, "Time sync call failed");
       }
       this->set_next_state_(State::IDLE);
     } break;
@@ -622,19 +635,58 @@ void IEC61107Component::prepare_prog_frame_(const char *request) {
   this->calculate_crc_prog_frame_(out_buf_, data_out_size_, true);
 }
 
-void IEC61107Component::prepare_non_session_prog_frame_(const char *request) {
+void IEC61107Component::prepare_non_session_prog_frame_(const char *request, bool write_mode) {
   // we assume request has format "XXXX(params)"
   // we assume it always has brackets
 
   // "/?!<SOH>R1<STX>NAME()<ETX><BCC>" broadcast
   // "/?<address>!<SOH>R1<STX>NAME()<ETX><BCC>" direct
 
-  data_out_size_ = snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "/?%s!%cR1%c%s%c\xFF", this->meter_address_.c_str(),
-                            SOH, STX, request, ETX);
+  data_out_size_ = snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "/?%s!%c%c1%c%s%c\xFF", this->meter_address_.c_str(),
+                            SOH, write_mode ? 'W' : 'R', STX, request, ETX);
   // find SOH
   uint8_t *r1_ptr = std::find(out_buf_, out_buf_ + data_out_size_, SOH);
   size_t r1_size = r1_ptr - out_buf_;
   calculate_crc_prog_frame_(r1_ptr, data_out_size_ - r1_size, true);
+}
+
+void IEC61107Component::print_time_() {
+  if (this->time_ == nullptr) {
+//    ESP_LOGD(TAG, "Time not configured in yaml");
+    return;
+  }
+  auto time = this->time_->now();
+  if (!time.is_valid()) {
+//    ESP_LOGD(TAG, "System time not synchronized yet. Unable to sync meter time");
+    return;
+  }
+  // CTIME(HH:MM:SS)
+  uint8_t str_time[32];
+  uint8_t str_time_len = snprintf((char *) str_time, 32, "CTIME(%02d:%02d:%02d)", time.hour, time.minute, time.second);
+  ESP_LOGD(TAG, "System RTC Time is %s", str_time);
+  return;
+}
+
+bool IEC61107Component::prepare_time_sync_frame_() {
+#ifdef USE_TIME
+  if (this->time_ == nullptr) {
+    ESP_LOGD(TAG, "Time not configured in yaml");
+    return false;
+  }
+  auto time = this->time_->now();
+  if (!time.is_valid()) {
+    ESP_LOGD(TAG, "System time not synchronized yet. Unable to sync meter time");
+    return false;
+  }
+  // CTIME(HH:MM:SS)
+  uint8_t str_time[32];
+  uint8_t str_time_len = snprintf((char *) str_time, 32, "CTIME(%02d:%02d:%02d)", time.hour, time.minute, time.second);
+  this->prepare_non_session_prog_frame_((char *) str_time, true);
+  return true;
+#elif
+  ESP_LOGD(TAG, "Time not configured in yaml");
+  return false;
+#endif
 }
 
 void IEC61107Component::send_frame_prepared_() {
@@ -717,13 +769,21 @@ size_t IEC61107Component::receive_frame_ascii_() {
   return receive_frame_(frame_end_check_crlf);
 }
 
-size_t IEC61107Component::receive_prog_frame_(uint8_t start_byte) {
+size_t IEC61107Component::receive_prog_frame_(uint8_t start_byte, bool accept_ack_and_nack) {
   // "<start_byte>data<ETX><BCC>"
   //  ESP_LOGVV(TAG, "Waiting for R1 frame, start byte: 0x%02x", start_byte);
-  auto frame_end_check_iec = [start_byte](uint8_t *b, size_t s) {
-    auto ret = (s > 3 && b[0] == start_byte && b[s - 2] == ETX);
+  auto frame_end_check_iec = [=](uint8_t *b, size_t s) {
+    auto ret = (accept_ack_and_nack && s == 1 && b[0] == ACK) ||  // ACK - request accepted
+               (accept_ack_and_nack && s == 1 && b[0] == NAK) ||  // NACK - request rejected
+               (s > 3 && b[0] == start_byte && b[s - 2] == ETX);  // Normal reply frame
     if (ret) {
-      ESP_LOGVV(TAG, "Frame R1 Stop");
+      if (s == 1 && b[0] == ACK) {
+        ESP_LOGVV(TAG, "Frame ACK Stop");
+      } else if (s == 1 && b[0] == NAK) {
+        ESP_LOGVV(TAG, "Frame NAK Stop");
+      } else {
+        ESP_LOGVV(TAG, "Frame R1 Stop");
+      }
     }
     return ret;
   };
@@ -829,6 +889,8 @@ const char *IEC61107Component::state_to_string(State state) {
       return "PUBLISH";
     case State::SINGLE_READ_ACK:
       return "SINGLE_READ_ACK";
+    case State::TIME_SYNC_ACK:
+      return "TIME_SYNC_ACK";
     default:
       return "UNKNOWN";
   }
