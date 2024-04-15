@@ -419,7 +419,7 @@ void IEC61107Component::loop() {
 
       this->set_next_state_(State::DATA_NEXT);
       auto req = req_iterator->first;
-      ESP_LOGD(TAG, "Data received for '%s'", req.c_str());
+      //      ESP_LOGD(TAG, "Data received for '%s'", req.c_str());
 
       uint8_t brackets_found = get_values_from_brackets_(in_buf_param_name, vals);
       if (!brackets_found) {
@@ -575,18 +575,21 @@ bool IEC61107Component::set_sensor_value_(IEC61107SensorBase *sensor, ValueRefsA
   return ret;
 }
 
-uint8_t IEC61107Component::calculate_crc_prog_frame_(const uint8_t *data, size_t length) {
+uint8_t IEC61107Component::calculate_crc_prog_frame_(uint8_t *data, size_t length, bool set_crc) {
   uint8_t crc = 0;
   if (length < 2) {
     return 0;
   }
   for (size_t i = 1; i < length - 1; i++) {
-    crc += data[i];
+    crc = (crc + data[i]) & 0x7f;
   }
-  return crc & 0x7f;
+  if (set_crc) {
+    data[length - 1] = crc;
+  }
+  return crc;
 }
 
-bool IEC61107Component::check_crc_prog_frame_(const uint8_t *data, size_t length) {
+bool IEC61107Component::check_crc_prog_frame_(uint8_t *data, size_t length) {
   uint8_t crc = this->calculate_crc_prog_frame_(data, length);
   return crc == data[length - 1];
 }
@@ -616,8 +619,7 @@ void IEC61107Component::prepare_prog_frame_(const char *request) {
   // we assume it always has brackets
   data_out_size_ = snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "%cR1%c%s%c\xFF", SOH, STX, request, ETX);
   //  data_out_size_ = snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "\x01R1\x02%s\x03\xFF", request);
-  uint8_t bcc = this->calculate_crc_prog_frame_(out_buf_, data_out_size_);
-  out_buf_[data_out_size_ - 1] = bcc;
+  this->calculate_crc_prog_frame_(out_buf_, data_out_size_, true);
 }
 
 void IEC61107Component::prepare_non_session_prog_frame_(const char *request) {
@@ -629,8 +631,10 @@ void IEC61107Component::prepare_non_session_prog_frame_(const char *request) {
 
   data_out_size_ = snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "/?%s!%cR1%c%s%c\xFF", this->meter_address_.c_str(),
                             SOH, STX, request, ETX);
-  uint8_t bcc = this->calculate_crc_prog_frame_(out_buf_, data_out_size_);
-  out_buf_[data_out_size_ - 1] = bcc;
+  // find SOH
+  uint8_t *r1_ptr = std::find(out_buf_, out_buf_ + data_out_size_, SOH);
+  size_t r1_size = r1_ptr - out_buf_;
+  calculate_crc_prog_frame_(r1_ptr, data_out_size_ - r1_size, true);
 }
 
 void IEC61107Component::send_frame_prepared_() {

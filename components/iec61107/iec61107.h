@@ -50,7 +50,6 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
 
   void register_sensor(IEC61107SensorBase *sensor);
   void set_indicator(binary_sensor::BinarySensor *indicator) { this->indicator_ = indicator; }
-  void set_stat_err_crc(sensor::Sensor *sensor) { this->stat_err_crc_ = sensor; }
   void set_reboot_after_failure(uint16_t number_of_failures) {
     this->number_of_failures_before_reboot_ = number_of_failures;
   }
@@ -137,8 +136,8 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   void set_baud_rate_(uint32_t baud_rate);
   bool are_baud_rates_different_() const { return baud_rate_handshake_ != baud_rate_; }
 
-  uint8_t calculate_crc_prog_frame_(const uint8_t *data, size_t length);
-  bool check_crc_prog_frame_(const uint8_t *data, size_t length);
+  uint8_t calculate_crc_prog_frame_(uint8_t *data, size_t length, bool set_crc = false);
+  bool check_crc_prog_frame_(uint8_t *data, size_t length);
 
   void prepare_frame_(const uint8_t *data, size_t length);
   void prepare_prog_frame_(const char *request);
