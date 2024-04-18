@@ -30,8 +30,28 @@ using ValueRefsArray = std::array<const char *, VAL_NUM>;
 using SensorMap = std::multimap<std::string, IEC61107SensorBase *>;
 using SingleRequests = std::list<std::string>;
 
-using FrameStopFunction = std::function<bool(uint8_t *buf, size_t size)>;
-using ReadFunction = std::function<size_t()>;
+enum class ProgMode : uint8_t { READ = 'R', WRITE = 'W' };
+
+// using FrameStopFunction = std::function<bool(uint8_t *buf, size_t size)>;
+// using FrameReadFunction = std::function<size_t()>;
+
+struct Result {
+  size_t size{0};
+  enum Code : uint8_t { NO_RESPONSE = 0b00, NACK = 0b01, ACK = 0b10, DATA = 0b11 } status{NO_RESPONSE};
+
+  Result(Code c) : size{0}, status{c} {};
+  Result(size_t s, Code c) : size{s}, status{c} {};
+
+  operator size_t() const { return size; };
+
+  bool is_ack() const { return status == Code::ACK; }
+  bool is_nack() const { return status == Code::NACK; }
+  bool is_data_received() const { return status == Code::DATA; }
+  bool is_response_received() const { return status != Code::NO_RESPONSE; }
+};
+
+using FrameStopFunction = std::function<Result(uint8_t *buf, size_t size)>;
+using ReadFrameFunction = std::function<Result()>;
 
 class IEC61107Component : public PollingComponent, public uart::UARTDevice {
  public:
@@ -64,7 +84,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
 
   void queue_single_read(const std::string &req);
   void queue_single_write(const std::string &req);
-  void queue_time_sync() { this->time_sync_request_ = true; }
+  void queue_time_sync() { this->time_sync_requested_ = true; }
 
  protected:
   std::string meter_address_{""};
@@ -77,7 +97,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
 
   SensorMap sensors_;
   SingleRequests single_requests_;
-  bool time_sync_request_{false};
+  bool time_sync_requested_{false};
 
   binary_sensor::BinarySensor *indicator_{};
   sensor::Sensor *stat_err_crc_{};
@@ -86,31 +106,38 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
     NOT_INITIALIZED,
     IDLE,
     WAIT,
-    READING_DATA,
+    WAITING_FOR_RESPONSE,
     OPEN_SESSION,
     OPEN_SESSION_GET_ID,
     SET_BAUD,
     ACK_START_GET_INFO,
     DATA_ENQ,
     DATA_RECV,
-    DATA_FAIL,
     DATA_NEXT,
+    TIME_SYNC,
+    TIME_CORRECTION,
+    TIME_CORRECTION_ACK,
     CLOSE_SESSION,
     PUBLISH,
     SINGLE_READ,
     SINGLE_READ_ACK,
-    TIME_SYNC_ACK,
-  } state_{State::NOT_INITIALIZED}, next_state_after_wait_{State::IDLE};
+  } state_{State::NOT_INITIALIZED};
+
+  struct {
+    uint32_t start_time;
+    uint32_t delay_ms;
+    State next_state{State::IDLE};
+  } wait_{0};
 
   bool is_idling() const { return this->state_ == State::WAIT || this->state_ == State::IDLE; };
 
   void set_next_state_(State next_state) { state_ = next_state; };
   void set_next_state_delayed_(uint32_t ms, State next_state);
 
-  void read_and_set_next_state_(ReadFunction read_fn, State next_state, uint8_t retries, bool mission_critical,
-                                bool check_crc);
+  void read_reply_and_go_next_state_(ReadFrameFunction read_frame_fn, State next_state, uint8_t retries, bool mission_critical,
+                                     bool check_crc);
   struct {
-    ReadFunction read_fn;
+    ReadFrameFunction read_frame_fn;
     State next_state;
     bool mission_critical;
     bool check_crc;
@@ -119,6 +146,7 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
     uint32_t err_crc;
     uint32_t err_invalid_frames;
   } reading_state_{nullptr, State::IDLE, false, false, 0, 0, 0, 0};
+  size_t received_frame_size_{0};
 
   const char *state_to_string(State state);
   void log_state_(State *next_state = nullptr);
@@ -131,14 +159,10 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   uint32_t number_of_crc_errors_recovered_{0};
   uint32_t number_of_invalid_frames_{0};
 
-  uint8_t retry_counter_{0};
-
   uint32_t baud_rate_handshake_{9600};
   uint32_t baud_rate_{9600};
 
   uint32_t last_rx_time_{0};
-  uint32_t wait_start_time_;
-  uint32_t wait_period_ms_;
 
   uint8_t in_buf_[MAX_IN_BUF_SIZE];
   size_t data_in_size_;
@@ -153,20 +177,18 @@ class IEC61107Component : public PollingComponent, public uart::UARTDevice {
   bool check_crc_prog_frame_(uint8_t *data, size_t length);
 
   void prepare_frame_(const uint8_t *data, size_t length);
-  void prepare_prog_frame_(const char *request);
-  void prepare_non_session_prog_frame_(const char *request, bool write = false);
+  void prepare_prog_frame_(const char *request, ProgMode mode = ProgMode::READ);
+  void prepare_non_session_prog_frame_(const char *request, ProgMode mode = ProgMode::READ);
 
   void send_frame_(const uint8_t *data, size_t length);
   void send_frame_prepared_();
 
-  size_t receive_frame_(FrameStopFunction stop_fn);
-  size_t receive_frame_ascii_();
-  size_t receive_prog_frame_(uint8_t start_byte, bool accept_ack_and_nack = false);
-
-  void retry_or_fail_(bool unclear = false);
+  Result receive_frame_(FrameStopFunction stop_fn);
+  Result receive_frame_ascii_();
+  Result receive_prog_frame_(uint8_t start_byte, bool accept_ack_and_nack = false);
 
   inline void update_last_rx_time_() { last_rx_time_ = millis(); }
-  bool check_wait_timeout_() { return millis() - wait_start_time_ >= wait_period_ms_; }
+  bool check_wait_timeout_() { return millis() - wait_.start_time >= wait_.delay_ms; }
   bool check_rx_timeout_() { return millis() - this->last_rx_time_ >= receive_timeout_ms_; }
 
   char *extract_meter_id_(size_t frame_size);

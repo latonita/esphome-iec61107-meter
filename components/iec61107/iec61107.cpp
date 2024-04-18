@@ -68,8 +68,11 @@ static std::string format_frame_pretty(const uint8_t *data, size_t length) {
       case 0x15:
         ss << "<NAK>";
         break;
+      case 0x20:
+        ss << "<SP>";
+        break;
       default:
-        if (data[i] < 0x20 || data[i] >= 0x7f) {
+        if (data[i] <= 0x20 || data[i] >= 0x7f) {
           ss << "<" << format_hex_char((data[i] & 0xF0) >> 4) << format_hex_char(data[i] & 0x0F) << ">";
         } else {
           ss << (char) data[i];
@@ -170,20 +173,6 @@ void IEC61107Component::report_failure(bool set_or_clear) {
   }
 }
 
-// void IEC61107Component::retry_or_fail_(bool unclear) {
-//   this->number_of_crc_errors_++;
-//   this->retry_counter_++;
-//   if (this->retry_counter_ > MAX_TRIES_CRC) {
-//     ESP_LOGE(TAG, "CRC error%s.", unclear ? " (unclear)" : "");
-//     this->retry_counter_ = 0;
-//     this->set_next_state_(State::DATA_FAIL);
-//   } else {
-//     ESP_LOGW(TAG, "CRC error%s. Retrying [%d/3]...", unclear ? " (unclear)" : "", this->retry_counter_);
-//     this->update_last_rx_time_();
-//     this->set_next_state_(State::DATA_ENQ);
-//   }
-// }
-
 void IEC61107Component::loop() {
   if (!this->is_ready() || this->state_ == State::NOT_INITIALIZED)
     return;
@@ -194,57 +183,47 @@ void IEC61107Component::loop() {
 
   char *in_buf_param_name = (char *) &in_buf_[1];  // skip first byte which is STX/SOH in R1 requests
   static ValueRefsArray vals;
-  static size_t frame_size{0};
 
   switch (this->state_) {
     case State::IDLE: {
       this->update_last_rx_time_();
       auto request = this->single_requests_.front();
 
-      if (!this->single_requests_.empty()) {
-        this->single_requests_.pop_front();
-        if (request.find("CTIME") == 0) {
-          this->time_sync_request_ = true;
-        } else {
-          ESP_LOGD(TAG, "Performing single read for '%s'", request.c_str());
-          this->prepare_non_session_prog_frame_(request.c_str());
-          this->send_frame_prepared_();
-          auto read_fn = [this]() { return this->receive_prog_frame_(STX, true); };
-          this->read_and_set_next_state_(read_fn, State::SINGLE_READ_ACK, 3, false, true);
-        }
-      }
+      if (this->single_requests_.empty())
+        break;
 
-      if (this->time_sync_request_) {
-        this->time_sync_request_ = false;
-        ESP_LOGD(TAG, "Performing time sync");
-        this->prepare_non_session_prog_frame_(request.c_str(), true);
-
-        //      if (this->prepare_time_sync_frame_()) {
-        auto read_fn = [this]() { return this->receive_prog_frame_(STX, true); };
-        this->read_and_set_next_state_(read_fn, State::TIME_SYNC_ACK, 3, false, true);
-        //        };
+      this->single_requests_.pop_front();
+      if (request == "CTIME()") {
+        this->time_sync_requested_ = true;
+        break;
       }
+      ESP_LOGD(TAG, "Performing single request '%s'", request.c_str());
+      this->prepare_non_session_prog_frame_(request.c_str());
+      this->send_frame_prepared_();
+      auto read_fn = [this]() { return this->receive_prog_frame_(STX, true); };
+      this->read_reply_and_go_next_state_(read_fn, State::SINGLE_READ_ACK, 3, false, true);
+
     } break;
 
     case State::WAIT:
       if (this->check_wait_timeout_()) {
-        this->set_next_state_(this->next_state_after_wait_);
+        this->set_next_state_(this->wait_.next_state);
+        this->update_last_rx_time_();
       }
-      this->update_last_rx_time_();
       break;
 
-    case State::READING_DATA: {
+    case State::WAITING_FOR_RESPONSE: {
       this->log_state_(&reading_state_.next_state);
-      frame_size = reading_state_.read_fn();
-      //      ESP_LOGD(TAG, "RD1, %d", frame_size);
+      Result result = reading_state_.read_frame_fn();
+      this->received_frame_size_ = result.size;
 
       bool crc_is_ok = true;
-      if (reading_state_.check_crc && frame_size > 0) {
-        crc_is_ok = check_crc_prog_frame_(in_buf_, frame_size);
+      if (reading_state_.check_crc && received_frame_size_ > 0) {
+        crc_is_ok = check_crc_prog_frame_(in_buf_, received_frame_size_);
       }
 
       // happy path first
-      if (frame_size > 0 && crc_is_ok) {
+      if (received_frame_size_ > 0 && crc_is_ok) {
         this->set_next_state_(reading_state_.next_state);
         this->update_last_rx_time_();
         this->number_of_crc_errors_ += reading_state_.err_crc;
@@ -254,12 +233,12 @@ void IEC61107Component::loop() {
       }
 
       // half-happy path
-      // if not timed out yet, wait for data to come
+      // if not timed out yet, wait for data to come a little more
       if (crc_is_ok && !this->check_rx_timeout_()) {
         return;
       }
 
-      if (frame_size == 0) {
+      if (received_frame_size_ == 0) {
         this->reading_state_.err_invalid_frames++;
         ESP_LOGW(TAG, "RX timeout.");
       } else if (!crc_is_ok) {
@@ -296,7 +275,7 @@ void IEC61107Component::loop() {
         this->update_last_rx_time_();
         return;
       }
-      frame_size = 0;
+      received_frame_size_ = 0;
       // failure, advancing to next state with no data received (frame_size = 0)
       this->number_of_crc_errors_ += reading_state_.err_crc;
       this->number_of_invalid_frames_ += reading_state_.err_invalid_frames;
@@ -320,15 +299,16 @@ void IEC61107Component::loop() {
       this->send_frame_(open_cmd, open_cmd_len);
       this->set_next_state_(State::OPEN_SESSION_GET_ID);
       auto read_fn = [this]() { return this->receive_frame_ascii_(); };
-      this->read_and_set_next_state_(read_fn, State::OPEN_SESSION_GET_ID, 0, true, false);
+      // mission crit, no crc
+      this->read_reply_and_go_next_state_(read_fn, State::OPEN_SESSION_GET_ID, 0, true, false);
 
     } break;
 
     case State::OPEN_SESSION_GET_ID:
       this->log_state_();
 
-      if (frame_size) {
-        char *meter_id = this->extract_meter_id_(frame_size);
+      if (received_frame_size_) {
+        char *meter_id = this->extract_meter_id_(received_frame_size_);
         if (meter_id == nullptr) {
           ESP_LOGE(TAG, "Invalid meter identification frame");
           this->number_of_invalid_frames_++;
@@ -348,7 +328,7 @@ void IEC61107Component::loop() {
         } else {
           this->send_frame_(CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
           auto read_fn = [this]() { return this->receive_prog_frame_(SOH); };
-          this->read_and_set_next_state_(read_fn, State::ACK_START_GET_INFO, 3, true, true);
+          this->read_reply_and_go_next_state_(read_fn, State::ACK_START_GET_INFO, 3, true, true);
         }
       }
       break;
@@ -363,10 +343,8 @@ void IEC61107Component::loop() {
 
     case State::ACK_START_GET_INFO:
       this->log_state_();
-      // frame_size = this->receive_prog_frame_(SOH);
-      // if (frame_size == 0)  // wait for more data until timeout
-      //   return;
-      if (frame_size == 0) {
+
+      if (received_frame_size_ == 0) {
         ESP_LOGE(TAG, "No response from meter.");
         this->number_of_invalid_frames_++;
         this->abort_mission_();
@@ -381,7 +359,6 @@ void IEC61107Component::loop() {
       }
 
       ESP_LOGD(TAG, "Meter address: %s", vals[0]);
-      this->retry_counter_ = 0;
       this->set_next_state_(State::DATA_ENQ);
       break;
 
@@ -397,24 +374,25 @@ void IEC61107Component::loop() {
         this->prepare_prog_frame_(req.c_str());
         this->send_frame_prepared_();
         auto read_fn = [this]() { return this->receive_prog_frame_(STX); };
-        this->read_and_set_next_state_(read_fn, State::DATA_RECV, 3, false, true);
+        this->read_reply_and_go_next_state_(read_fn, State::DATA_RECV, 3, false, true);
       }
       break;
 
     case State::DATA_RECV: {
       this->log_state_();
+      this->set_next_state_(State::DATA_NEXT);
 
-      if (frame_size == 0) {
-        this->set_next_state_(State::DATA_FAIL);
+      if (received_frame_size_ == 0) {
+        ESP_LOGD(TAG, "Response not received or corrupted. Next.");
+        this->update_last_rx_time_();
+        this->clear_rx_buffers_();
         return;
       }
 
-      this->set_next_state_(State::DATA_NEXT);
       auto req = req_iterator->first;
-      //      ESP_LOGD(TAG, "Data received for '%s'", req.c_str());
 
       if (req_iterator->second->get_function() == "TIME_") {
-        this->print_time_();
+        this->print_time_();  // just for the kicks to see difference in in the log
       }
 
       uint8_t brackets_found = get_values_from_brackets_(in_buf_param_name, vals);
@@ -451,23 +429,46 @@ void IEC61107Component::loop() {
       }
     } break;
 
-    case State::DATA_FAIL:
-      this->log_state_();
-      ESP_LOGD(TAG, "Response not received or corrupted. Next.");
-      this->update_last_rx_time_();
-      this->clear_rx_buffers_();
-      this->set_next_state_(State::DATA_NEXT);
-      break;
-
-    case State::DATA_NEXT:
+    case State::DATA_NEXT: {
       this->log_state_();
       req_iterator = this->sensors_.upper_bound(req_iterator->first);
       if (req_iterator != this->sensors_.end()) {
         this->set_next_state_delayed_(this->delay_between_requests_ms_, State::DATA_ENQ);
-      } else {
-        this->set_next_state_delayed_(this->delay_between_requests_ms_, State::CLOSE_SESSION);
+        break;
       }
-      break;
+
+      if (this->time_sync_requested_) {
+        this->set_next_state_(State::TIME_CORRECTION);
+      } else {
+        this->set_next_state_(State::CLOSE_SESSION);
+      }
+      //      this->set_next_state_delayed_(this->delay_between_requests_ms_, State::CLOSE_SESSION);
+    } break;
+
+    case State::TIME_CORRECTION: {
+      this->log_state_();
+      this->prepare_prog_frame_("CTIME(-29)",ProgMode::WRITE);
+      this->send_frame_prepared_();
+      auto read_frame_fn = [this]() { return this->receive_prog_frame_(STX, true); };
+      this->read_reply_and_go_next_state_(read_frame_fn, State::TIME_CORRECTION_ACK, 3, false, false);
+    } break;
+
+    case State::TIME_CORRECTION_ACK: {
+      this->log_state_();
+      if (received_frame_size_ == 1 && in_buf_[0] == ACK) {
+        ESP_LOGD(TAG, "Time correction successful");
+      } else if (received_frame_size_ == 1 && in_buf_[0] == NAK) {
+        ESP_LOGE(TAG, "Time correction rejected. Obey 24h rule.");
+      } else if (received_frame_size_ >= 5) {
+        // <STX>(ERR12)<ETX>  (10)
+        in_buf_[received_frame_size_ - 2] = '\0';
+        uint8_t *str = in_buf_ + 1;
+        ESP_LOGE(TAG, "Time correction error returned. %s", str);
+      } else {
+        ESP_LOGE(TAG, "Time correction call failed");
+      }
+      this->set_next_state_(State::CLOSE_SESSION);
+    } break;
 
     case State::CLOSE_SESSION:
       this->log_state_();
@@ -509,27 +510,10 @@ void IEC61107Component::loop() {
 
     case State::SINGLE_READ_ACK: {
       this->log_state_();
-      if (frame_size) {
+      if (received_frame_size_) {
         ESP_LOGD(TAG, "Single read frame received");
       } else {
         ESP_LOGE(TAG, "Failed to make single read call");
-      }
-      this->set_next_state_(State::IDLE);
-    } break;
-
-    case State::TIME_SYNC_ACK: {
-      this->log_state_();
-      if (frame_size == 1 && in_buf_[0] == ACK) {
-        ESP_LOGD(TAG, "Time sync successful");
-      } else if (frame_size == 1 && in_buf_[0] == NAK) {
-        ESP_LOGE(TAG, "Time sync rejected. Obey 24h rule.");
-      } else if (frame_size >= 5) {
-        // <STX>(ERR12)<ETX>  (10)
-        in_buf_[frame_size - 2] = '\0';
-        uint8_t *str = in_buf_ + 1;
-        ESP_LOGE(TAG, "Time sync error returned. %s", str);
-      } else {
-        ESP_LOGE(TAG, "Time sync call failed");
       }
       this->set_next_state_(State::IDLE);
     } break;
@@ -608,34 +592,41 @@ bool IEC61107Component::check_crc_prog_frame_(uint8_t *data, size_t length) {
 }
 
 void IEC61107Component::set_next_state_delayed_(uint32_t ms, State next_state) {
-  ESP_LOGV(TAG, "Short delay for %u ms", ms);
-  set_next_state_(State::WAIT);
-  wait_start_time_ = millis();
-  wait_period_ms_ = ms;
-  next_state_after_wait_ = next_state;
+  if (ms == 0) {
+    set_next_state_(next_state);
+  } else {
+    ESP_LOGV(TAG, "Short delay for %u ms", ms);
+    set_next_state_(State::WAIT);
+    wait_.start_time = millis();
+    wait_.delay_ms = ms;
+    wait_.next_state = next_state;
+  }
 }
 
-void IEC61107Component::read_and_set_next_state_(ReadFunction read_fn, State next_state, uint8_t retries,
-                                                 bool mission_critical, bool check_crc) {
-  set_next_state_(State::READING_DATA);
+void IEC61107Component::read_reply_and_go_next_state_(ReadFrameFunction read_frame_fn, State next_state,
+                                                      uint8_t retries, bool mission_critical, bool check_crc) {
   reading_state_ = {};
-  reading_state_.read_fn = read_fn;
+  reading_state_.read_frame_fn = read_frame_fn;
+  reading_state_.mission_critical = mission_critical;
   reading_state_.tries_max = retries;
   reading_state_.tries_counter = 0;
   reading_state_.check_crc = check_crc;
   reading_state_.next_state = next_state;
-  reading_state_.mission_critical = mission_critical;
+  received_frame_size_ = 0;
+
+  set_next_state_(State::WAITING_FOR_RESPONSE);
 }
 
-void IEC61107Component::prepare_prog_frame_(const char *request) {
+void IEC61107Component::prepare_prog_frame_(const char *request, ProgMode mode) {
   // we assume request has format "XXXX(params)"
   // we assume it always has brackets
-  data_out_size_ = snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "%cR1%c%s%c\xFF", SOH, STX, request, ETX);
+  data_out_size_ =
+      snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "%c%c1%c%s%c\xFF", SOH, (uint8_t) mode, STX, request, ETX);
   //  data_out_size_ = snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "\x01R1\x02%s\x03\xFF", request);
   this->calculate_crc_prog_frame_(out_buf_, data_out_size_, true);
 }
 
-void IEC61107Component::prepare_non_session_prog_frame_(const char *request, bool write_mode) {
+void IEC61107Component::prepare_non_session_prog_frame_(const char *request, ProgMode mode) {
   // we assume request has format "XXXX(params)"
   // we assume it always has brackets
 
@@ -643,7 +634,7 @@ void IEC61107Component::prepare_non_session_prog_frame_(const char *request, boo
   // "/?<address>!<SOH>R1<STX>NAME()<ETX><BCC>" direct
 
   data_out_size_ = snprintf((char *) out_buf_, MAX_OUT_BUF_SIZE, "/?%s!%c%c1%c%s%c\xFF", this->meter_address_.c_str(),
-                            SOH, write_mode ? 'W' : 'R', STX, request, ETX);
+                            SOH, (uint8_t) mode, STX, request, ETX);
   // find SOH
   uint8_t *r1_ptr = std::find(out_buf_, out_buf_ + data_out_size_, SOH);
   size_t r1_size = r1_ptr - out_buf_;
@@ -652,41 +643,18 @@ void IEC61107Component::prepare_non_session_prog_frame_(const char *request, boo
 
 void IEC61107Component::print_time_() {
   if (this->time_ == nullptr) {
-//    ESP_LOGD(TAG, "Time not configured in yaml");
+    //    ESP_LOGD(TAG, "Time not configured in yaml");
     return;
   }
   auto time = this->time_->now();
   if (!time.is_valid()) {
-//    ESP_LOGD(TAG, "System time not synchronized yet. Unable to sync meter time");
+    //    ESP_LOGD(TAG, "System time not synchronized yet. Unable to sync meter time");
     return;
   }
-  // CTIME(HH:MM:SS)
   uint8_t str_time[32];
-  uint8_t str_time_len = snprintf((char *) str_time, 32, "CTIME(%02d:%02d:%02d)", time.hour, time.minute, time.second);
+  uint8_t str_time_len = snprintf((char *) str_time, 32, "%02d:%02d:%02d", time.hour, time.minute, time.second);
   ESP_LOGD(TAG, "System RTC Time is %s", str_time);
   return;
-}
-
-bool IEC61107Component::prepare_time_sync_frame_() {
-#ifdef USE_TIME
-  if (this->time_ == nullptr) {
-    ESP_LOGD(TAG, "Time not configured in yaml");
-    return false;
-  }
-  auto time = this->time_->now();
-  if (!time.is_valid()) {
-    ESP_LOGD(TAG, "System time not synchronized yet. Unable to sync meter time");
-    return false;
-  }
-  // CTIME(HH:MM:SS)
-  uint8_t str_time[32];
-  uint8_t str_time_len = snprintf((char *) str_time, 32, "CTIME(%02d:%02d:%02d)", time.hour, time.minute, time.second);
-  this->prepare_non_session_prog_frame_((char *) str_time, true);
-  return true;
-#elif
-  ESP_LOGD(TAG, "Time not configured in yaml");
-  return false;
-#endif
 }
 
 void IEC61107Component::send_frame_prepared_() {
@@ -712,80 +680,85 @@ void IEC61107Component::send_frame_(const uint8_t *data, size_t length) {
   this->send_frame_prepared_();
 }
 
-size_t IEC61107Component::receive_frame_(FrameStopFunction stop_fn) {
+Result IEC61107Component::receive_frame_(FrameStopFunction stop_fn) {
   const uint32_t read_time_limit_ms = 25;
   size_t ret_val;
 
   auto count = this->available();
   if (count <= 0)
-    return 0;
+    return Result(Result::Code::NO_RESPONSE);
 
   uint32_t read_start = millis();
   uint8_t *p;
   while (count-- > 0) {
     if (millis() - read_start > read_time_limit_ms) {
-      return 0;
+      return Result(Result::Code::NO_RESPONSE);
     }
 
     if (data_in_size_ < MAX_IN_BUF_SIZE) {
       p = &in_buf_[data_in_size_];
       if (!iuart_->read_one_byte(p)) {
-        return 0;
+        return Result(Result::Code::NO_RESPONSE);
       }
       data_in_size_++;
     } else {
       memmove(in_buf_, in_buf_ + 1, data_in_size_ - 1);
       p = &in_buf_[data_in_size_ - 1];
       if (!iuart_->read_one_byte(p)) {
-        return 0;
+        return Result(Result::Code::NO_RESPONSE);
       }
     }
 
-    if (stop_fn(in_buf_, data_in_size_)) {
+    Result result = stop_fn(in_buf_, data_in_size_);
+    if (result.is_response_received()) {
       ESP_LOGV(TAG, "RX: %s", format_frame_pretty(in_buf_, data_in_size_).c_str());
       ESP_LOGVV(TAG, "RX: %s", format_hex_pretty(in_buf_, data_in_size_).c_str());
-      ret_val = data_in_size_;
+      result.size = data_in_size_;
       data_in_size_ = 0;
       this->update_last_rx_time_();
-      return ret_val;
+      return result;
     }
 
     yield();
     App.feed_wdt();
   }
-  return 0;
+  return Result(Result::Code::NO_RESPONSE);
 }
 
-size_t IEC61107Component::receive_frame_ascii_() {
+Result IEC61107Component::receive_frame_ascii_() {
   // "data<CR><LF>"
   ESP_LOGVV(TAG, "Waiting for ASCII frame");
-  auto frame_end_check_crlf = [](uint8_t *b, size_t s) {
-    auto ret = s >= 2 && b[s - 1] == '\n' && b[s - 2] == '\r';
-    if (ret) {
+  auto frame_end_check_crlf = [](uint8_t *b, size_t s) -> Result {
+    bool test = s >= 2 && b[s - 1] == '\n' && b[s - 2] == '\r';
+    if (test) {
       ESP_LOGVV(TAG, "Frame CRLF Stop");
+      return Result(Result::Code::DATA);
     }
-    return ret;
+    return Result(Result::Code::NO_RESPONSE);
   };
   return receive_frame_(frame_end_check_crlf);
 }
 
-size_t IEC61107Component::receive_prog_frame_(uint8_t start_byte, bool accept_ack_and_nack) {
+Result IEC61107Component::receive_prog_frame_(uint8_t start_byte, bool accept_ack_and_nack) {
   // "<start_byte>data<ETX><BCC>"
   //  ESP_LOGVV(TAG, "Waiting for R1 frame, start byte: 0x%02x", start_byte);
-  auto frame_end_check_iec = [=](uint8_t *b, size_t s) {
-    auto ret = (accept_ack_and_nack && s == 1 && b[0] == ACK) ||  // ACK - request accepted
-               (accept_ack_and_nack && s == 1 && b[0] == NAK) ||  // NACK - request rejected
-               (s > 3 && b[0] == start_byte && b[s - 2] == ETX);  // Normal reply frame
-    if (ret) {
+  auto frame_end_check_iec = [=](uint8_t *b, size_t s) -> Result {
+    bool stop = (accept_ack_and_nack && s == 1 && b[0] == ACK) ||  // ACK - request accepted
+                (accept_ack_and_nack && s == 1 && b[0] == NAK) ||  // NACK - request rejected
+                (s > 3 && b[0] == start_byte && b[s - 2] == ETX);  // Normal reply frame
+    if (stop) {
       if (s == 1 && b[0] == ACK) {
         ESP_LOGVV(TAG, "Frame ACK Stop");
+        return Result(Result::Code::ACK);
       } else if (s == 1 && b[0] == NAK) {
         ESP_LOGVV(TAG, "Frame NAK Stop");
+        return Result(Result::Code::NACK);
       } else {
-        ESP_LOGVV(TAG, "Frame R1 Stop");
+        ESP_LOGVV(TAG, "Frame ETX Stop");
+        return Result(Result::Code::DATA);
       }
     }
-    return ret;
+    return Result(Result::Code::NO_RESPONSE);
   };
   return receive_frame_(frame_end_check_iec);
 }
@@ -865,8 +838,8 @@ const char *IEC61107Component::state_to_string(State state) {
       return "IDLE";
     case State::WAIT:
       return "WAIT";
-    case State::READING_DATA:
-      return "READING_DATA";
+    case State::WAITING_FOR_RESPONSE:
+      return "WAITING_FOR_RESPONSE";
     case State::OPEN_SESSION:
       return "OPEN_SESSION";
     case State::OPEN_SESSION_GET_ID:
@@ -879,18 +852,18 @@ const char *IEC61107Component::state_to_string(State state) {
       return "DATA_ENQ";
     case State::DATA_RECV:
       return "DATA_RECV";
-    case State::DATA_FAIL:
-      return "DATA_FAIL";
     case State::DATA_NEXT:
       return "DATA_NEXT";
+    case State::TIME_CORRECTION:
+      return "TIME_CORRECTION";
+    case State::TIME_CORRECTION_ACK:
+      return "TIME_CORRECTION_ACK";
     case State::CLOSE_SESSION:
       return "CLOSE_SESSION";
     case State::PUBLISH:
       return "PUBLISH";
     case State::SINGLE_READ_ACK:
       return "SINGLE_READ_ACK";
-    case State::TIME_SYNC_ACK:
-      return "TIME_SYNC_ACK";
     default:
       return "UNKNOWN";
   }
