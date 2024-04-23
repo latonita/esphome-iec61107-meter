@@ -10,8 +10,6 @@ from esphome.const import (
     CONF_RECEIVE_TIMEOUT,
     CONF_UPDATE_INTERVAL,
     CONF_FLOW_CONTROL_PIN,
-    DEVICE_CLASS_PROBLEM,
-    ENTITY_CATEGORY_DIAGNOSTIC,
 )
 
 CODEOWNERS = ["@latonita"]
@@ -20,7 +18,12 @@ AUTO_LOAD = ["binary_sensor"]
 
 DEPENDENCIES = ["uart"]
 
-MAX_SENSOR_INDEX = 12
+DEFAULTS_MAX_SENSOR_INDEX = 12
+DEFAULTS_BAUD_RATE_HANDSHAKE = 9600
+DEFAULTS_BAUD_RATE_SESSION = 9600
+DEFAULTS_RECEIVE_TIMEOUT = "500ms"
+DEFAULTS_DELAY_BETWEEN_REQUESTS = "50ms"
+DEFAULTS_UPDATE_INTERVAL = "30s"
 
 CONF_IEC61107_ID = "iec61107_id"
 CONF_REQUEST = "request"
@@ -71,26 +74,24 @@ CONFIG_SCHEMA = cv.All(
                 cv.string, validate_meter_address
             ),
             cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
-            cv.Optional(CONF_BAUD_RATE_HANDSHAKE, default=9600): cv.one_of(*BAUD_RATES),
-            cv.Optional(CONF_BAUD_RATE, default=9600): cv.one_of(*BAUD_RATES),
             cv.Optional(
-                CONF_RECEIVE_TIMEOUT, default="500ms"
+                CONF_BAUD_RATE_HANDSHAKE, default=DEFAULTS_BAUD_RATE_HANDSHAKE
+            ): cv.one_of(*BAUD_RATES),
+            cv.Optional(CONF_BAUD_RATE, default=DEFAULTS_BAUD_RATE_SESSION): cv.one_of(
+                *BAUD_RATES
+            ),
+            cv.Optional(
+                CONF_RECEIVE_TIMEOUT, default=DEFAULTS_RECEIVE_TIMEOUT
             ): cv.positive_time_period_milliseconds,
             cv.Optional(
-                CONF_DELAY_BETWEEN_REQUESTS, default="150ms"
+                CONF_DELAY_BETWEEN_REQUESTS, default=DEFAULTS_DELAY_BETWEEN_REQUESTS
             ): cv.positive_time_period_milliseconds,
-            cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): cv.update_interval,
+            cv.Optional(
+                CONF_UPDATE_INTERVAL, default=DEFAULTS_UPDATE_INTERVAL
+            ): cv.update_interval,
             cv.Optional(CONF_REBOOT_AFTER_FAILURE, default=0): cv.int_range(
                 min=0, max=100
             ),
-            cv.Optional(CONF_INDICATOR): binary_sensor.binary_sensor_schema(
-                device_class=DEVICE_CLASS_PROBLEM,
-                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
-            ),
-            # cv.Optional(CONF_STAT_ERR_CRC): sensor.sensor_schema(
-            #     entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
-            #     accuracy_decimals=2,
-            # ),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -103,29 +104,14 @@ async def to_code(config):
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
 
-    if CONF_FLOW_CONTROL_PIN in config:
-        pin = await cg.gpio_pin_expression(config[CONF_FLOW_CONTROL_PIN])
+    if flow_control_pin := config.get(CONF_FLOW_CONTROL_PIN):
+        pin = await cg.gpio_pin_expression(flow_control_pin)
         cg.add(var.set_flow_control_pin(pin))
-
-    # if stat_config := config.get(CONF_STAT_ERR_CRC):
-    #     sens = await sensor.new_sensor(stat_config)
-    #     cg.add(var.set_stat_err_crc(sens))
 
     if indicator_config := config.get(CONF_INDICATOR):
         sens = cg.new_Pvariable(indicator_config[CONF_ID])
         await binary_sensor.register_binary_sensor(sens, indicator_config)
         cg.add(var.set_indicator(sens))
-
-    # if err_stat_config := config.get(CONF_STAT_ERR_CRC):
-    #     sens = cg.new_Pvariable(err_stat_config[CONF_ID])
-    #     await sensor.register_sensor(sens, err_stat_config)
-    #     cg.add(var.set_stat_err_crc(sens))
-
-    # if CONF_INDICATOR in config:
-    #     conf = config[CONF_INDICATOR]
-    #     sens = cg.new_Pvariable(conf[CONF_ID])
-    #     await binary_sensor.register_binary_sensor(sens, conf)
-    #     cg.add(var.set_indicator(sens))
 
     cg.add(var.set_meter_address(config[CONF_ADDRESS]))
     cg.add(var.set_baud_rates(config[CONF_BAUD_RATE_HANDSHAKE], config[CONF_BAUD_RATE]))
