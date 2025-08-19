@@ -31,11 +31,13 @@ static const uint32_t TIMEOUT = 30;  // default value in uart implementation is 
 
 class Iec61107Uart final : public uart::ESP32ArduinoUARTComponent {
  public:
-  Iec61107Uart(uart::ESP32ArduinoUARTComponent const &uart)
-      : uart_(uart), hw_(uart.*(&Iec61107Uart::hw_serial_)) {}
+  Iec61107Uart(uart::ESP32ArduinoUARTComponent const &uart) : uart_(uart), hw_(uart.*(&Iec61107Uart::hw_serial_)) {}
 
   // Reconfigure baudrate
-  void update_baudrate(uint32_t baudrate) { this->hw_->updateBaudRate(baudrate); }
+  bool update_baudrate(uint32_t baudrate) {
+    this->hw_->updateBaudRate(baudrate);
+    return true;
+  }
 
   /// @brief Reads one byte. Uses 20ms inter-character timeout.
   /// @param data Pointer to one byte buffer to store data
@@ -86,12 +88,16 @@ class Iec61107Uart final : public uart::ESP8266UartComponent {
   Iec61107Uart(uart::ESP8266UartComponent const &uart)
       : uart_(uart), hw_(uart.*(&Iec61107Uart::hw_serial_)), sw_(uart.*(&Iec61107Uart::sw_serial_)) {}
 
-  void update_baudrate(uint32_t baudrate) {
+  bool update_baudrate(uint32_t baudrate) {
+    if (baudrate == 0) {
+      return false;
+    }
     if (this->hw_ != nullptr) {
       this->hw_->updateBaudRate(baudrate);
-    } else if (baudrate > 0) {
+    } else {
       ((XSoftSerial *) sw_)->set_bit_time(F_CPU / baudrate);
     }
+    return true;
   }
 
   bool read_one_byte(uint8_t *data) {

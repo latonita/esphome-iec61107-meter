@@ -671,28 +671,50 @@ void Iec61107Component::loop() {
 
       uint8_t brackets_found = get_values_from_brackets_(in_param_ptr, vals);
       if (!brackets_found) {
-        ESP_LOGE(TAG, "Invalid frame format: '%s'", in_param_ptr);
+        ESP_LOGE(TAG, "Invalid frame format: '%s'. Received no data groups.", in_param_ptr);
         this->stats_.invalid_frames_++;
         return;
       }
 
-      ESP_LOGD(TAG,
-               "Received name: '%s', values: %d, idx: 1(%s), 2(%s), 3(%s), 4(%s), 5(%s), 6(%s), 7(%s), 8(%s), 9(%s), "
-               "10(%s), 11(%s), 12(%s)",
-               in_param_ptr, brackets_found, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7],
-               vals[8], vals[9], vals[10], vals[11]);
+      switch (brackets_found) {
+        case 1: {
+          ESP_LOGV(TAG, "Received name: '%s', 1 block: (%s)",  //
+                   in_param_ptr, vals[0]);
+        } break;
+        case 2: {
+          ESP_LOGV(TAG, "Received name: '%s', %d blocks: #1(%s), #2(%s)",  //
+                   in_param_ptr, brackets_found, vals[0], vals[1]);
+        } break;
+        case 3: {
+          ESP_LOGV(TAG, "Received name: '%s', %d blocks: #1(%s), #2(%s), #3(%s)",  //
+                   in_param_ptr, brackets_found, vals[0], vals[1], vals[2]);
+        } break;
+        case 4: {
+          ESP_LOGV(TAG, "Received name: '%s', %d blocks: #1(%s), #2(%s), #3(%s), #4(%s)",  //
+                   in_param_ptr, brackets_found, vals[0], vals[1], vals[2], vals[3]);
+        } break;
+        default: {
+          ESP_LOGV(
+              TAG,
+              "Received name: '%s', %d blocks: #1(%s), #2(%s), #3(%s), #4(%s), #5(%s), #6(%s), #7(%s), #8(%s), #9(%s), "
+              "#10(%s), #11(%s), #12(%s)",
+              in_param_ptr, brackets_found, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7],
+              vals[8], vals[9], vals[10], vals[11]);
+        }
+      }
 
       if (in_param_ptr[0] == '\0') {
-        if (vals[0][0] == 'E' && vals[0][1] == 'R' && vals[0][2] == 'R') {
-          ESP_LOGE(TAG, "Request '%s' either not supported or malformed. Error code %s", in_param_ptr, vals[0]);
+        if (vals[0][0] != '\0') {
+          ESP_LOGW(TAG, "Request '%s' either not supported or malformed. Error returned: '%s'", req.c_str(), vals[0]);
         } else {
-          ESP_LOGE(TAG, "Request '%s' either not supported or malformed.", in_param_ptr);
+          ESP_LOGW(TAG, "Request '%s' either not supported or malformed.", req.c_str());
         }
         return;
       }
 
       if (this->loop_state_.request_iter->second->get_function() != in_param_ptr) {
-        ESP_LOGE(TAG, "Returned data name mismatch. Skipping frame");
+        ESP_LOGW(TAG, "Returned data name mismatch. Requested '%s', Received '%s'. Skipping frame.", req.c_str(),
+                 in_param_ptr);
         return;
       }
 
@@ -728,7 +750,7 @@ void Iec61107Component::loop() {
 
     case State::PUBLISH:
       this->log_state_();
-      ESP_LOGD(TAG, "Publishing data");
+      ESP_LOGV(TAG, "Publishing data");
       this->update_last_rx_time_();
 
       if (this->loop_state_.sensor_iter != this->sensors_.end()) {
@@ -820,8 +842,8 @@ bool Iec61107Component::set_sensor_value_(Iec61107SensorBase *sensor, ValueRefsA
   if (sub_idx == 0) {
     ESP_LOGD(TAG, "Setting value for sensor '%s', idx = %d to '%s'", sensor->get_request().c_str(), idx + 1, str);
   } else {
-    ESP_LOGD(TAG, "Extracting value for sensor '%s', idx = %d, sub_idx = %d", sensor->get_request().c_str(),
-             idx + 1, sub_idx);
+    ESP_LOGD(TAG, "Extracting value for sensor '%s', idx = %d, sub_idx = %d", sensor->get_request().c_str(), idx + 1,
+             sub_idx);
     str = this->get_nth_value_from_csv_(str, sub_idx);
     if (str == nullptr) {
       ESP_LOGE(TAG,
