@@ -141,4 +141,6 @@ sdkconfig.*
 
 /*.yaml
 /*.yml
-!ce102m.yaml
+!luna.yaml
+!neva-124-mt.yaml
+!neva-324-mt.yaml

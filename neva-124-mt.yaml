@@ -1,0 +1,236 @@
+esphome:
+  name: neva-mt-iec
+
+# esp8266:
+#   board: nodemcuv2
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: VERBOSE
+
+external_components:
+  - source: github://latonita/esphome-iec61107-meter
+    refresh: 30s
+    components: [iec61107]
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 5min
+  power_save_mode: NONE
+
+api:
+  password: !secret api_password
+
+ota:
+  platform: esphome
+  password: !secret ota_password
+
+status_led:
+  pin: GPIO02
+
+button:
+  - platform: restart
+    id: restart_button
+    name: "Restart"
+
+  - platform: safe_mode
+    name: "Restart (Safe Mode)"
+
+uart:
+    tx_pin: GPIO17
+    rx_pin: GPIO16
+
+    baud_rate: 300
+    data_bits: 7
+    parity: even
+    stop_bits: 1
+
+iec61107:
+  - id: meter_01
+    update_interval: 30s
+    receive_timeout: 3000ms
+    baud_rate_handshake: 300
+    baud_rate: 9600
+    programming_mode: true  # Счетчики НЕВА требуют формального входа в режим программирования
+    password: "00000000"    # и указания пароля (по-умолчанию "00000000")
+    crc_method: XOR         # Метод расчета контрольной суммы в Неве - XOR
+
+sensor:
+  # Current
+  - platform: iec61107
+    name: Current
+    obis_code: 0B0700FF
+    unit_of_measurement: A
+    accuracy_decimals: 3
+    device_class: current
+    state_class: measurement
+
+  # Voltage
+  - platform: iec61107
+    name: Voltage
+    obis_code: 0C0700FF
+    unit_of_measurement: V
+    accuracy_decimals: 1
+    device_class: voltage
+    state_class: measurement
+
+  # Active energies
+  - platform: iec61107
+    name: Energy Total
+    obis_code: 0F0880FF
+    index: 1
+    sub_index: 1
+    unit_of_measurement: kWh
+    accuracy_decimals: 0
+    device_class: energy
+    state_class: total_increasing
+
+  - platform: iec61107
+    name: Energy T1
+    obis_code: 0F0880FF
+    index: 1
+    sub_index: 2
+    unit_of_measurement: kWh
+    accuracy_decimals: 0
+    device_class: energy
+    state_class: total_increasing
+
+  - platform: iec61107
+    name: Energy T2
+    obis_code: 0F0880FF
+    index: 1
+    sub_index: 3
+    unit_of_measurement: kWh
+    accuracy_decimals: 0
+    device_class: energy
+    state_class: total_increasing
+
+  # - platform: iec61107
+  #   name: Energy T3
+  #   obis_code: 0F0880FF
+  #   index: 1
+  #   sub_index: 4
+  #   unit_of_measurement: kWh
+  #   accuracy_decimals: 0
+  #   device_class: energy
+  #   state_class: total_increasing
+
+  # - platform: iec61107
+  #   name: Energy T4
+  #   obis_code: 0F0880FF
+  #   index: 1
+  #   sub_index: 5
+  #   unit_of_measurement: kWh
+  #   accuracy_decimals: 0
+  #   device_class: energy
+  #   state_class: total_increasing
+
+  # Historical energies (disabled)
+  # - platform: iec61107
+  #   name: Energy, 1 month ago
+  #   obis_code: 0F088000
+  #   index: 1
+  #   sub_index: 1
+  #   unit_of_measurement: kWh
+  #   accuracy_decimals: 0
+  #   device_class: energy
+  #   state_class: total_increasing
+  #
+  # - platform: iec61107
+  #   name: Energy, 2 months ago
+  #   obis_code: 0F088001
+  #   index: 1
+  #   sub_index: 1
+  #   unit_of_measurement: kWh
+  #   accuracy_decimals: 0
+  #   device_class: energy
+  #   state_class: total_increasing
+  #
+  # ... repeat for months 3–12 ...
+
+  # Active Power
+  - platform: iec61107
+    name: Active Power
+    obis_code: 100700FF
+    unit_of_measurement: W
+    accuracy_decimals: 0
+    device_class: power
+    state_class: measurement
+
+  # Max Power history (disabled)
+  # - platform: iec61107
+  #   name: Max Power, current month
+  #   obis_code: 0F0680FF
+  #   unit_of_measurement: W
+  #   accuracy_decimals: 0
+  #   device_class: power
+  #   state_class: measurement
+  #
+  # - platform: iec61107
+  #   name: Max Power, 1 month ago
+  #   obis_code: 0F068000
+  #   unit_of_measurement: W
+  #   accuracy_decimals: 0
+  #   device_class: power
+  #   state_class: measurement
+  #
+  # ... repeat for months 2–12 ...
+
+  # Frequency
+  - platform: iec61107
+    name: Frequency
+    obis_code: 0E0701FF
+    unit_of_measurement: Hz
+    accuracy_decimals: 1
+    device_class: frequency
+    state_class: measurement
+
+  # Power Factor
+  - platform: iec61107
+    name: Power Factor
+    obis_code: 0D07FFFF
+    unit_of_measurement: ""
+    accuracy_decimals: 3
+    state_class: measurement
+
+  # Temperature (disabled)
+  # - platform: iec61107
+  #   name: Temperature
+  #   obis_code: 600900FF
+  #   unit_of_measurement: °C
+  #   accuracy_decimals: 1
+  #   device_class: temperature
+  #   state_class: measurement
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: IP Address
+
+  - platform: iec61107
+    name: Serial number
+    obis_code: 600100FF
+    entity_category: diagnostic
+
+  - platform: iec61107
+    name: Time
+    obis_code: 000901FF
+    entity_category: diagnostic
+    filters:
+      - lambda: |-
+          std::string str = x.substr(0,2) + ":" + x.substr(2,2) + ":" + x.substr(4,2);
+          return str;
+
+  - platform: iec61107
+    name: Date
+    obis_code: 000902FF
+    entity_category: diagnostic
+    filters:
+      - lambda: |-
+          std::string str = "20" + x.substr(0,2) + "-" + x.substr(2,2) + "-" + x.substr(4,2);
+          return str;

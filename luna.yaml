@@ -1,0 +1,187 @@
+esphome:
+  name: luna-iec
+
+# esp8266:
+#   board: nodemcuv2
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: VERBOSE
+
+external_components:
+  - source: github://latonita/esphome-iec61107-meter
+    refresh: 30s
+    components: [iec61107]
+
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 5min
+  power_save_mode: NONE
+
+api:
+  password: !secret api_password
+
+ota:
+  platform: esphome
+  password: !secret ota_password
+
+status_led:
+  pin: GPIO02
+
+button:
+  - platform: restart
+    id: restart_button
+    name: "Restart"
+
+  - platform: safe_mode
+    name: "Restart (Safe Mode)"
+
+uart:
+    tx_pin: GPIO17
+    rx_pin: GPIO16
+
+    baud_rate: 300
+    data_bits: 7
+    parity: even
+    stop_bits: 1
+
+iec61107:
+  - id: meter_01
+    update_interval: 30s
+    receive_timeout: 3000ms
+    baud_rate_handshake: 300
+    baud_rate: 9600
+#    programming_mode: true  # Некоторые счетчики требуют формального входа в режим программирования
+#    password: "00000000"    # и указания пароля (по-умолчанию "00000000")
+#    crc_method: XOR         # XOR или SUM7
+sensor:
+  # Active Energy Total
+  - platform: iec61107
+    name: "AP Energy"
+    obis_code: "1.8.0()"
+    unit_of_measurement: "kWh"
+    accuracy_decimals: 3
+    state_class: measurement
+
+  # - platform: iec61107
+  #   name: "AP Energy T1"
+  #   obis_code: "1.8.1()"
+  #   unit_of_measurement: "kWh"
+  #   accuracy_decimals: 3
+  #   state_class: measurement
+
+  # - platform: iec61107
+  #   name: "AP Energy T2"
+  #   obis_code: "1.8.2()"
+  #   unit_of_measurement: "kWh"
+  #   accuracy_decimals: 3
+  #   state_class: measurement
+
+  # - platform: iec61107
+  #   name: "AP Energy T3"
+  #   obis_code: "1.8.3()"
+  #   unit_of_measurement: "kWh"
+  #   accuracy_decimals: 3
+  #   state_class: measurement
+
+  # - platform: iec61107
+  #   name: "AP Energy T4"
+  #   obis_code: "1.8.4()"
+  #   unit_of_measurement: "kWh"
+  #   accuracy_decimals: 3
+  #   state_class: measurement
+
+  # Voltages
+  - platform: iec61107
+    name: "Voltage L1"
+    obis_code: "32.7.0()"
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: iec61107
+    name: "Voltage L2"
+    obis_code: "52.7.0()"
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: iec61107
+    name: "Voltage L3"
+    obis_code: "72.7.0()"
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    state_class: measurement
+
+  # Currents
+  - platform: iec61107
+    name: "Current L1"
+    obis_code: "31.7.0()"
+    unit_of_measurement: "A"
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: iec61107
+    name: "Current L2"
+    obis_code: "51.7.0()"
+    unit_of_measurement: "A"
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: iec61107
+    name: "Current L3"
+    obis_code: "71.7.0()"
+    unit_of_measurement: "A"
+    accuracy_decimals: 3
+    state_class: measurement
+
+  # Power Factor
+  - platform: iec61107
+    name: "Cos Phi L1"
+    obis_code: "33.7.0()"
+    unit_of_measurement: ""
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: iec61107
+    name: "Cos Phi L2"
+    obis_code: "53.7.0()"
+    unit_of_measurement: ""
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: iec61107
+    name: "Cos Phi L3"
+    obis_code: "73.7.0()"
+    unit_of_measurement: ""
+    accuracy_decimals: 3
+    state_class: measurement
+
+  # Frequency
+  - platform: iec61107
+    name: "Frequency"
+    obis_code: "14.7.0()"
+    unit_of_measurement: "Hz"
+    accuracy_decimals: 3
+    state_class: measurement
+
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: IP Address
+
+  # - platform: iec61107
+  #   name: "SN"
+  #   obis_code: "0.0.0()"
+  #   unit_of_measurement: ""
+  #   accuracy_decimals: 0
+  #   state_class: measurement
+
+
