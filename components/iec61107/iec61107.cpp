@@ -820,8 +820,8 @@ bool Iec61107Component::set_sensor_value_(Iec61107SensorBase *sensor, ValueRefsA
   if (sub_idx == 0) {
     ESP_LOGD(TAG, "Setting value for sensor '%s', idx = %d to '%s'", sensor->get_request().c_str(), idx + 1, str);
   } else {
-    ESP_LOGD(TAG, "Extracting value for sensor '%s', idx = %d, sub_idx = %d from '%s'", sensor->get_request().c_str(),
-             idx + 1, sub_idx, str);
+    ESP_LOGD(TAG, "Extracting value for sensor '%s', idx = %d, sub_idx = %d", sensor->get_request().c_str(),
+             idx + 1, sub_idx);
     str = this->get_nth_value_from_csv_(str, sub_idx);
     if (str == nullptr) {
       ESP_LOGE(TAG,
