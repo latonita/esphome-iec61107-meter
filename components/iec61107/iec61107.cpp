@@ -228,9 +228,7 @@ void Iec61107Component::loop() {
     case State::TRY_LOCK_BUS: {
       this->log_state_();
       if (this->try_lock_uart_session_()) {
-        if (this->are_baud_rates_different_()) {
-          this->set_baud_rate_(this->baud_rate_handshake_);
-        }
+        this->set_baud_rate_(this->baud_rate_handshake_);
         this->set_next_state_delayed_(50, State::OPEN_SESSION);
       } else {
         ESP_LOGV(TAG, "UART Bus is busy, waiting ...");
@@ -337,9 +335,9 @@ void Iec61107Component::loop() {
       this->log_state_();
 
       if (received_frame_size_) {
-        char *id = this->extract_meter_id_(received_frame_size_);
+        char *id = this->extract_meter_id_and_baud_(received_frame_size_);
         if (id == nullptr) {
-          ESP_LOGE(TAG, "Invalid meter identification frame");
+          ESP_LOGE(TAG, "Meter identification frame invalid");
           this->stats_.invalid_frames_++;
           this->abort_mission_();
           return;
@@ -347,7 +345,7 @@ void Iec61107Component::loop() {
 
         uint8_t baud_cmd[sizeof(CMD_ACK_SET_BAUD_AND_MODE)];
         memcpy(baud_cmd, CMD_ACK_SET_BAUD_AND_MODE, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
-        baud_cmd[2] = baud_rate_to_byte(this->baud_rate_);  // set baud rate
+        baud_cmd[2] = baud_rate_to_byte(this->baud_rate_negotiated_);  // set baud rate
 
         this->send_frame_(baud_cmd, sizeof(CMD_ACK_SET_BAUD_AND_MODE));
         this->update_last_rx_time_();
@@ -364,7 +362,7 @@ void Iec61107Component::loop() {
     case State::SET_BAUD: {
       this->log_state_();
       this->update_last_rx_time_();
-      this->set_baud_rate_(this->baud_rate_);
+      this->set_baud_rate_(this->baud_rate_negotiated_);
       this->set_next_state_delayed_(50, State::ACK_READ_P0_CONFIRMATION);
     } break;
 
@@ -1104,7 +1102,7 @@ void Iec61107Component::clear_rx_buffers_() {
   this->buffers_.amount_in = 0;
 }
 
-char *Iec61107Component::extract_meter_id_(size_t frame_size) {
+char *Iec61107Component::extract_meter_id_and_baud_(size_t frame_size) {
   uint8_t *p = &this->buffers_.in[frame_size - 1 - 2 /*\r\n*/];
   size_t min_id_data_size = 7;  // min packet is '/XXXZ\r\n'
 
@@ -1136,11 +1134,10 @@ char *Iec61107Component::extract_meter_id_(size_t frame_size) {
       ident = nullptr;
     } else {
       baud = byte_to_baud_rate((uint8_t) baud_code);
-      ESP_LOGD(TAG, "Meter max baud rate: %d (code '%c')", baud, baud_code);
-      this->baud_rate_meter_max = baud;
+      ESP_LOGD(TAG, "Meter baud rate: %d (code '%c')", baud, baud_code);
+      this->baud_rate_negotiated_ = baud;
     }
   }
-
   return ident;
 }
 

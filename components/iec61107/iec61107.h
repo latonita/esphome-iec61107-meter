@@ -47,10 +47,7 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
   float get_setup_priority() const override { return setup_priority::DATA; };
 
   void set_meter_address(const std::string &addr) { this->meter_address_ = addr; };
-  void set_baud_rates(uint32_t baud_rate_handshake, uint32_t baud_rate) {
-    this->baud_rate_handshake_ = baud_rate_handshake;
-    this->baud_rate_ = baud_rate;
-  };
+  void set_baud_rate_for_handshake(uint32_t baud_rate_handshake) { this->baud_rate_handshake_ = baud_rate_handshake; };
   void set_receive_timeout_ms(uint32_t timeout) { this->receive_timeout_ms_ = timeout; };
   void set_delay_between_requests_ms(uint32_t delay) { this->delay_between_requests_ms_ = delay; };
   void set_flow_control_pin(GPIOPin *flow_control_pin) { this->flow_control_pin_ = flow_control_pin; };
@@ -147,10 +144,8 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
   } reading_state_{nullptr, State::IDLE, false, false, 0, 0, 0, 0};
   size_t received_frame_size_{0};
 
-  uint32_t baud_rate_handshake_{9600};
-  uint32_t baud_rate_{9600};
-
-  uint32_t baud_rate_meter_max{9600};
+  uint32_t baud_rate_handshake_{300};
+  uint32_t baud_rate_negotiated_{9600};
 
   uint32_t last_rx_time_{0};
 
@@ -164,7 +159,7 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
   void clear_rx_buffers_();
 
   void set_baud_rate_(uint32_t baud_rate);
-  bool are_baud_rates_different_() const { return baud_rate_handshake_ != baud_rate_; }
+  bool are_baud_rates_different_() const { return baud_rate_handshake_ != baud_rate_negotiated_; }
 
   uint8_t calculate_crc_prog_frame_(uint8_t *data, size_t length, bool set_crc = false);
   bool check_crc_prog_frame_(uint8_t *data, size_t length);
@@ -188,7 +183,7 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
   bool check_wait_timeout_() { return millis() - wait_.start_time >= wait_.delay_ms; }
   bool check_rx_timeout_() { return millis() - this->last_rx_time_ >= receive_timeout_ms_; }
 
-  char *extract_meter_id_(size_t frame_size);
+  char *extract_meter_id_and_baud_(size_t frame_size);
   uint8_t get_values_from_brackets_(char *line, ValueRefsArray &vals);
   char *get_nth_value_from_csv_(char *line, uint8_t idx);
   bool set_sensor_value_(Iec61107SensorBase *sensor, ValueRefsArray &vals);

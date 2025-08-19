@@ -6,7 +6,6 @@ from esphome.components import uart, binary_sensor, time
 from esphome.const import (
     CONF_ID,
     CONF_ADDRESS,
-    CONF_BAUD_RATE,
     CONF_PASSWORD,
     CONF_RECEIVE_TIMEOUT,
     CONF_UPDATE_INTERVAL,
@@ -95,9 +94,6 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(
                 CONF_BAUD_RATE_HANDSHAKE, default=DEFAULTS_BAUD_RATE_HANDSHAKE
             ): cv.one_of(*BAUD_RATES),
-            cv.Optional(CONF_BAUD_RATE, default=DEFAULTS_BAUD_RATE_SESSION): cv.one_of(
-                *BAUD_RATES
-            ),
             cv.Optional(
                 CONF_RECEIVE_TIMEOUT, default=DEFAULTS_RECEIVE_TIMEOUT
             ): cv.positive_time_period_milliseconds,
@@ -142,7 +138,7 @@ async def to_code(config):
         cg.add(var.set_time_source(time_))
         
     cg.add(var.set_meter_address(config[CONF_ADDRESS]))
-    cg.add(var.set_baud_rates(config[CONF_BAUD_RATE_HANDSHAKE], config[CONF_BAUD_RATE]))
+    cg.add(var.set_baud_rate_for_handshake(config[CONF_BAUD_RATE_HANDSHAKE]))
     cg.add(var.set_receive_timeout_ms(config[CONF_RECEIVE_TIMEOUT]))
     cg.add(var.set_delay_between_requests_ms(config[CONF_DELAY_BETWEEN_REQUESTS]))
     cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))

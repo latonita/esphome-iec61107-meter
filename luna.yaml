@@ -56,7 +56,6 @@ iec61107:
     update_interval: 30s
     receive_timeout: 3000ms
     baud_rate_handshake: 300
-    baud_rate: 9600
 #    programming_mode: true  # Некоторые счетчики требуют формального входа в режим программирования
 #    password: "00000000"    # и указания пароля (по-умолчанию "00000000")
 #    crc_method: XOR         # XOR или SUM7
