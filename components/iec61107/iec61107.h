@@ -79,6 +79,9 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
   bool programming_mode_required_{false};
   std::string password_{""};
 
+  std::string iec_manufacturer_{""};
+  std::string iec_device_{""};
+
 #ifdef USE_TIME
   time::RealTimeClock *time_source_{nullptr};
 #endif

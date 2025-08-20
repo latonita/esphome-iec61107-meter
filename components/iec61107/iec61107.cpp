@@ -402,6 +402,7 @@ void Iec61107Component::loop() {
       this->update_last_rx_time_();
       auto read_fn = [this]() { return this->receive_frame_ack_nak_close_(); };
       this->read_reply_and_go_next_state_(read_fn, State::PROGRAMMING_MODE_ACK, 0, true, false);
+      ESP_LOGD(TAG, "Requesting programming mode (P1)");
 
     } break;
 
@@ -648,7 +649,7 @@ void Iec61107Component::loop() {
         break;
       } else {
         auto req = this->loop_state_.request_iter->first;
-        ESP_LOGD(TAG, "Requesting data for '%s'", req.c_str());
+        ESP_LOGD(TAG, "Request '%s'", req.c_str());
         this->prepare_prog_frame_(req.c_str());
         this->send_frame_prepared_();
         auto read_fn = [this]() { return this->receive_prog_frame_(STX); };
@@ -840,20 +841,17 @@ bool Iec61107Component::set_sensor_value_(Iec61107SensorBase *sensor, ValueRefsA
   char *str = str_buffer;
   uint8_t sub_idx = sensor->get_sub_index();
   if (sub_idx == 0) {
-    ESP_LOGD(TAG, "Setting value for sensor '%s', idx = %d to '%s'", sensor->get_request().c_str(), idx + 1, str);
+    ESP_LOGD(TAG, "Got for '%s' (idx = %d) : '%s'", sensor->get_request().c_str(), idx + 1, str);
   } else {
-    ESP_LOGD(TAG, "Extracting value for sensor '%s', idx = %d, sub_idx = %d", sensor->get_request().c_str(), idx + 1,
-             sub_idx);
     str = this->get_nth_value_from_csv_(str, sub_idx);
     if (str == nullptr) {
-      ESP_LOGE(TAG,
-               "Cannot extract sensor value by sub-index %d. Is data comma-separated? Also note that sub-index starts "
-               "from 1",
-               sub_idx);
+      ESP_LOGE(TAG, "Failed for '%s' (idx = %d, sub_idx = %d)", sensor->get_request().c_str(), idx + 1, sub_idx);
+      ESP_LOGE(TAG, "Cannot extract sensor value by sub-index. Is data comma-separated? "
+                    "Also note that sub-index starts from 1");
       str_buffer[0] = '\0';
       str = str_buffer;
     }
-    ESP_LOGD(TAG, "Setting value using sub-index = %d, extracted sensor value is '%s'", sub_idx, str);
+    ESP_LOGD(TAG, "Got for '%s' (idx = %d, sub_idx = %d) : '%s'", sensor->get_request().c_str(), idx + 1, sub_idx, str);
   }
 
   if (type == SensorType::SENSOR) {
@@ -1138,12 +1136,15 @@ char *Iec61107Component::extract_meter_id_and_baud_(size_t frame_size) {
         break;
       }
       this->buffers_.in[frame_size - 2] = '\0';  // terminate string and remove \r\n
-      ESP_LOGD(TAG, "Meter identification: '%s'", p);
 
       ident = (char *) p;
+
+      ESP_LOGD(TAG, "Meter identification string: '%s'", ident);
+      this->iec_manufacturer_.assign(ident + 1, 3);
+      this->iec_device_.assign(ident + 5);
+      ESP_LOGD(TAG, " - Manufacturer: '%s', Device: '%s'", this->iec_manufacturer_.c_str(), this->iec_device_.c_str());
       break;
     }
-
     p--;
   }
 
@@ -1156,7 +1157,7 @@ char *Iec61107Component::extract_meter_id_and_baud_(size_t frame_size) {
       ident = nullptr;
     } else {
       baud = byte_to_baud_rate((uint8_t) baud_code);
-      ESP_LOGD(TAG, "Meter baud rate: %d (code '%c')", baud, baud_code);
+      ESP_LOGD(TAG, " - Supported baud rate: %d (code '%c')", baud, baud_code);
       this->baud_rate_negotiated_ = baud;
     }
   }
