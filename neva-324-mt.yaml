@@ -111,7 +111,6 @@ sensor:
   #   device_class: energy
   #   state_class: total_increasing
 
-  # New: Reactive energies. 
   - platform: iec61107
     obis_code: 030880FF
     index: 1
@@ -172,7 +171,6 @@ sensor:
     device_class: energy
     state_class: total_increasing
 
-  # Already present: Active Power total
   - platform: iec61107
     name: Active Power
     obis_code: 100700FF
@@ -181,7 +179,6 @@ sensor:
     device_class: power
     state_class: measurement
 
-  # New: Per-phase active power
   - platform: iec61107
     name: Active Power L1
     obis_code: 240700FF
@@ -206,10 +203,9 @@ sensor:
     device_class: power
     state_class: measurement
 
-  # Already present: Urms A/B/C
   - platform: iec61107
     name: Voltage L1
-    obis_code: 200700FF
+    obis_code: 200700FF     # 1-0:32.7.0*255 L1 voltage
     unit_of_measurement: V
     accuracy_decimals: 3
     device_class: voltage
@@ -217,7 +213,7 @@ sensor:
 
   - platform: iec61107
     name: Voltage L2
-    obis_code: 340700FF
+    obis_code: 340700FF    # 1-0:52.7.0*255 L2 voltage
     unit_of_measurement: V
     accuracy_decimals: 3
     device_class: voltage
@@ -231,7 +227,6 @@ sensor:
     device_class: voltage
     state_class: measurement
 
-  # Already present: Irms A/B/C
   - platform: iec61107
     name: Current L1
     obis_code: 1F0700FF
@@ -257,7 +252,6 @@ sensor:
     device_class: current
     state_class: measurement
 
-  # Already present
   - platform: iec61107
     name: Frequency
     obis_code: 0E0701FF
@@ -266,7 +260,6 @@ sensor:
     device_class: frequency
     state_class: measurement
 
-  # New: Voltage angles
   - platform: iec61107
     name: Voltage angle L1-L2
     obis_code: 51070AFF
@@ -288,7 +281,6 @@ sensor:
     accuracy_decimals: 1
     state_class: measurement
 
-  # New: Power factors
   - platform: iec61107
     name: Power Factor L1
     obis_code: 2107FFFF
@@ -317,7 +309,6 @@ sensor:
     accuracy_decimals: 3
     state_class: measurement
 
-  # Already present
   - platform: iec61107
     name: Temperature
     obis_code: 600900FF

@@ -60,7 +60,7 @@ iec61107:
     crc_method: XOR         # Метод расчета контрольной суммы в Неве - XOR
 
 sensor:
-  # Current
+  # Current 1-0:11.7.0*255
   - platform: iec61107
     name: Current
     obis_code: 0B0700FF
@@ -69,7 +69,7 @@ sensor:
     device_class: current
     state_class: measurement
 
-  # Voltage
+  # Voltage 1-0:12.7.0*255
   - platform: iec61107
     name: Voltage
     obis_code: 0C0700FF
@@ -78,7 +78,6 @@ sensor:
     device_class: voltage
     state_class: measurement
 
-  # Active energies
   - platform: iec61107
     name: Energy Total
     obis_code: 0F0880FF
