@@ -118,11 +118,7 @@ void Iec61107Component::setup() {
   if (this->flow_control_pin_ != nullptr) {
     this->flow_control_pin_->setup();
   }
-#ifdef USE_ESP32_FRAMEWORK_ARDUINO
-  iuart_ = make_unique<Iec61107Uart>(*static_cast<uart::ESP32ArduinoUARTComponent *>(this->parent_));
-#endif
-
-#ifdef USE_ESP_IDF
+#ifdef USE_ESP32
   iuart_ = make_unique<Iec61107Uart>(*static_cast<uart::IDFUARTComponent *>(this->parent_));
   // if (this->flow_control_pin_ != nullptr) {
   //   if (this->flow_control_pin_->is_internal()) {
