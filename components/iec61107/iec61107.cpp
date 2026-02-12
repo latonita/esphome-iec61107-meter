@@ -1,8 +1,8 @@
-#include "esphome/core/log.h"
-#include "esphome/core/helpers.h"
-#include "esphome/core/application.h"
-#include "esphome/core/time.h"
 #include "iec61107.h"
+#include "esphome/core/application.h"
+#include "esphome/core/helpers.h"
+#include "esphome/core/log.h"
+#include "esphome/core/time.h"
 #include "iec61107_protocol.h"
 #include <sstream>
 
@@ -12,15 +12,15 @@ namespace iec61107 {
 static const char *TAG0 = "iec61107_";
 #define TAG (this->tag_.c_str())
 
-using protocol::SOH;
-using protocol::STX;
-using protocol::ETX;
-using protocol::EOT;
-using protocol::ENQ;
 using protocol::ACK;
 using protocol::CR;
+using protocol::ENQ;
+using protocol::EOT;
+using protocol::ETX;
 using protocol::LF;
 using protocol::NAK;
+using protocol::SOH;
+using protocol::STX;
 
 static constexpr uint8_t BOOT_WAIT_S = 10;
 
@@ -114,9 +114,10 @@ void Iec61107Component::setup() {
   iuart_ = make_unique<Iec61107Uart>(*static_cast<uart::IDFUARTComponent *>(this->parent_));
   // if (this->flow_control_pin_ != nullptr) {
   //   if (this->flow_control_pin_->is_internal()) {
-  //     ESP_LOGI(TAG, "Flow control pin is internal GPIO pin, half-duplex mode is enabled in UART driver");
-  //     auto pin = static_cast<InternalGPIOPin *>(this->flow_control_pin_);
-  //     if (pin != nullptr && pin->get_pin() >= 0) {
+  //     ESP_LOGI(TAG, "Flow control pin is internal GPIO pin, half-duplex mode
+  //     is enabled in UART driver"); auto pin = static_cast<InternalGPIOPin
+  //     *>(this->flow_control_pin_); if (pin != nullptr && pin->get_pin() >= 0)
+  //     {
   //       ESP_LOGI(TAG, "Flow control pin: GPIO%d", pin->get_pin());
   //       iuart_->setup_half_duplex(32);  //
   //       // pin->get_pin());
@@ -124,7 +125,8 @@ void Iec61107Component::setup() {
   //       ESP_LOGW(TAG, "Flow control pin is not set, using default GPIO");
   //     }
   //   } else {
-  //     ESP_LOGW(TAG, "Flow control pin is not internal GPIO pin, half-duplex mode is manual");
+  //     ESP_LOGW(TAG, "Flow control pin is not internal GPIO pin, half-duplex
+  //     mode is manual");
   //   }
   // }
 #endif
@@ -139,7 +141,6 @@ void Iec61107Component::setup() {
     this->clear_rx_buffers_();
     this->set_next_state_(State::IDLE);
   });
-
 }
 
 void Iec61107Component::dump_config() {
@@ -195,80 +196,51 @@ void Iec61107Component::loop() {
   if (!this->is_ready() || this->state_ == State::NOT_INITIALIZED)
     return;
 
-  switch (this->state_) {
-    case State::IDLE:
-      this->handle_idle_();
-      break;
-    case State::TRY_LOCK_BUS:
-      this->handle_try_lock_bus_();
-      break;
-    case State::WAIT:
-      this->handle_wait_();
-      break;
-    case State::WAITING_FOR_RESPONSE:
-      this->handle_waiting_for_response_();
-      break;
-    case State::OPEN_SESSION:
-      this->handle_open_session_();
-      break;
-    case State::OPEN_SESSION_GET_ID:
-      this->handle_open_session_get_id_();
-      break;
-    case State::SET_BAUD:
-      this->handle_set_baud_();
-      break;
-    case State::ACK_READ_P0_CONFIRMATION:
-      this->handle_ack_read_p0_confirmation_();
-      break;
-    case State::ACK_START_GET_INFO:
-      this->handle_ack_start_get_info_();
-      break;
-    case State::PROGRAMMING_MODE_REQ:
-      this->handle_programming_mode_req_();
-      break;
-    case State::PROGRAMMING_MODE_ACK:
-      this->handle_programming_mode_ack_();
-      break;
-    case State::MAIN_SESSION:
-      this->handle_main_session_();
-      break;
-    case State::GET_DATE:
-      this->handle_get_date_();
-      break;
-    case State::GET_TIME:
-      this->handle_get_time_();
-      break;
-    case State::CORRECT_TIME:
-      this->handle_correct_time_();
-      break;
-    case State::RECV_CORRECTION_RESULT:
-      this->handle_recv_correction_result_();
-      break;
-    case State::DATA_ENQ:
-      this->handle_data_enq_();
-      break;
-    case State::DATA_RECV:
-      this->handle_data_recv_();
-      break;
-    case State::DATA_NEXT:
-      this->handle_data_next_();
-      break;
-    case State::CLOSE_SESSION:
-      this->handle_close_session_();
-      break;
-    case State::PUBLISH:
-      this->handle_publish_();
-      break;
-    case State::SINGLE_READ:
-      this->handle_single_read_();
-      break;
-    case State::SINGLE_READ_ACK:
-      this->handle_single_read_ack_();
-      break;
+  using StateHandler = void (Iec61107Component::*)();
+  static const auto state_handlers = []() {
+    std::array<StateHandler, static_cast<size_t>(State::STATE_COUNT)> handlers{};
+    auto set = [&handlers](State state, StateHandler handler) { handlers[static_cast<size_t>(state)] = handler; };
 
-    default:
-      break;
+    set(State::IDLE, &Iec61107Component::handle_idle_);
+    set(State::TRY_LOCK_BUS, &Iec61107Component::handle_try_lock_bus_);
+    set(State::WAIT, &Iec61107Component::handle_wait_);
+    set(State::WAITING_FOR_RESPONSE, &Iec61107Component::handle_waiting_for_response_);
+    set(State::OPEN_SESSION, &Iec61107Component::handle_open_session_);
+    set(State::OPEN_SESSION_GET_ID, &Iec61107Component::handle_open_session_get_id_);
+    set(State::SET_BAUD, &Iec61107Component::handle_set_baud_);
+    set(State::ACK_READ_P0_CONFIRMATION, &Iec61107Component::handle_ack_read_p0_confirmation_);
+    set(State::ACK_START_GET_INFO, &Iec61107Component::handle_ack_start_get_info_);
+    set(State::PROGRAMMING_MODE_REQ, &Iec61107Component::handle_programming_mode_req_);
+    set(State::PROGRAMMING_MODE_ACK, &Iec61107Component::handle_programming_mode_ack_);
+    set(State::MAIN_SESSION, &Iec61107Component::handle_main_session_);
+    set(State::GET_DATE, &Iec61107Component::handle_get_date_);
+    set(State::GET_TIME, &Iec61107Component::handle_get_time_);
+    set(State::CORRECT_TIME, &Iec61107Component::handle_correct_time_);
+    set(State::RECV_CORRECTION_RESULT, &Iec61107Component::handle_recv_correction_result_);
+    set(State::DATA_ENQ, &Iec61107Component::handle_data_enq_);
+    set(State::DATA_RECV, &Iec61107Component::handle_data_recv_);
+    set(State::DATA_NEXT, &Iec61107Component::handle_data_next_);
+    set(State::CLOSE_SESSION, &Iec61107Component::handle_close_session_);
+    set(State::PUBLISH, &Iec61107Component::handle_publish_);
+    set(State::SINGLE_READ, &Iec61107Component::handle_single_read_);
+    set(State::SINGLE_READ_ACK, &Iec61107Component::handle_single_read_ack_);
+
+    return handlers;
+  }();
+
+  const auto state_index = static_cast<size_t>(this->state_);
+  if (state_index >= state_handlers.size()) {
+    ESP_LOGE(TAG, "Invalid state index: %u", (unsigned) state_index);
+    return;
   }
+
+  auto handler = state_handlers[state_index];
+  if (handler == nullptr) {
+    ESP_LOGE(TAG, "No handler for state: %s", this->state_to_string(this->state_));
+    return;
+  }
+
+  (this->*handler)();
 }
 
 void Iec61107Component::handle_idle_() {
@@ -283,7 +255,8 @@ void Iec61107Component::handle_idle_() {
   // this->prepare_non_session_prog_frame_(request.c_str());
   // this->send_frame_prepared_();
   // auto read_fn = [this]() { return this->receive_prog_frame_(STX, true); };
-  // this->read_reply_and_go_next_state_(read_fn, State::SINGLE_READ_ACK, 3, false, true);
+  // this->read_reply_and_go_next_state_(read_fn, State::SINGLE_READ_ACK, 3,
+  // false, true);
 }
 
 void Iec61107Component::handle_try_lock_bus_() {
@@ -403,8 +376,8 @@ void Iec61107Component::handle_open_session_get_id_() {
     }
 
     uint8_t baud_cmd[protocol::ACK_SET_BAUD_AND_MODE_FRAME_SIZE];
-    size_t baud_cmd_len = protocol::build_ack_set_baud_and_mode_frame(
-        baud_cmd, sizeof(baud_cmd), baud_rate_to_byte(this->baud_rate_negotiated_));
+    size_t baud_cmd_len = protocol::build_ack_set_baud_and_mode_frame(baud_cmd, sizeof(baud_cmd),
+                                                                      baud_rate_to_byte(this->baud_rate_negotiated_));
 
     this->send_frame_(baud_cmd, baud_cmd_len);
     this->update_last_rx_time_();
@@ -512,7 +485,8 @@ void Iec61107Component::handle_get_time_() {
   this->update_last_rx_time_();
 
   if (received_frame_size_ != 22 && received_frame_size_ != 23) {
-    ESP_LOGE(TAG, "No response or wrong response from meter. Can't get date, skipping sync.");
+    ESP_LOGE(TAG, "No response or wrong response from meter. Can't get date, "
+                  "skipping sync.");
     this->stats_.invalid_frames_++;
     this->set_next_state_(State::DATA_ENQ);
     return;
@@ -558,7 +532,8 @@ void Iec61107Component::handle_correct_time_() {
 
   if (received_frame_size_ != 20) {
     // no data or something wrong. error or malformed response
-    ESP_LOGE(TAG, "No response or wrong response from meter. Can't get time, skipping sync.");
+    ESP_LOGE(TAG, "No response or wrong response from meter. Can't get time, "
+                  "skipping sync.");
     this->stats_.invalid_frames_++;
     return;
   }
@@ -605,9 +580,10 @@ void Iec61107Component::handle_correct_time_() {
     return;
   }
 
-  // check if time is 2 mins before or after midnight, then skip correction, wait for next data request
-  // just to make sure we have proper date/time
-  if ((meter_datetime.hour == 0 && meter_datetime.minute < 2) || (meter_datetime.hour == 23 && meter_datetime.minute > 58)) {
+  // check if time is 2 mins before or after midnight, then skip correction,
+  // wait for next data request just to make sure we have proper date/time
+  if ((meter_datetime.hour == 0 && meter_datetime.minute < 2) ||
+      (meter_datetime.hour == 23 && meter_datetime.minute > 58)) {
     ESP_LOGD(TAG, "Time is too close to midnight, skipping correction.");
     return;
   }
@@ -644,9 +620,11 @@ void Iec61107Component::handle_correct_time_() {
   constexpr int32_t SECONDS_IN_24H = 24 * 3600;
 
   // if correction is more than 24 hours,
-  // it is serious meter failure, meter shall be replaced or time is completely wrong
+  // it is serious meter failure, meter shall be replaced or time is completely
+  // wrong
   if (correction_seconds > SECONDS_IN_24H || correction_seconds < -SECONDS_IN_24H) {
-    ESP_LOGE(TAG, "Time correction is more than 24 hours, meter is broken or time is completely wrong.");
+    ESP_LOGE(TAG, "Time correction is more than 24 hours, meter is broken or "
+                  "time is completely wrong.");
     return;
   }
 
@@ -740,7 +718,8 @@ void Iec61107Component::handle_data_recv_() {
     } break;
     default: {
       ESP_LOGV(TAG,
-               "Received name: '%s', %d blocks: #1(%s), #2(%s), #3(%s), #4(%s), #5(%s), #6(%s), #7(%s), #8(%s), #9(%s), "
+               "Received name: '%s', %d blocks: #1(%s), #2(%s), #3(%s), #4(%s), "
+               "#5(%s), #6(%s), #7(%s), #8(%s), #9(%s), "
                "#10(%s), #11(%s), #12(%s)",
                in_param_ptr, brackets_found, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7],
                vals[8], vals[9], vals[10], vals[11]);
@@ -749,7 +728,10 @@ void Iec61107Component::handle_data_recv_() {
 
   if (in_param_ptr[0] == '\0') {
     if (vals[0][0] != '\0') {
-      ESP_LOGW(TAG, "Request '%s' either not supported or malformed. Error returned: '%s'", req.c_str(), vals[0]);
+      ESP_LOGW(TAG,
+               "Request '%s' either not supported or malformed. Error "
+               "returned: '%s'",
+               req.c_str(), vals[0]);
     } else {
       ESP_LOGW(TAG, "Request '%s' either not supported or malformed.", req.c_str());
     }
@@ -757,7 +739,10 @@ void Iec61107Component::handle_data_recv_() {
   }
 
   if (this->loop_state_.request_iter->second->get_function() != in_param_ptr) {
-    ESP_LOGW(TAG, "Returned data name mismatch. Requested '%s', Received '%s'. Skipping frame.", req.c_str(), in_param_ptr);
+    ESP_LOGW(TAG,
+             "Returned data name mismatch. Requested '%s', Received '%s'. "
+             "Skipping frame.",
+             req.c_str(), in_param_ptr);
     return;
   }
 
@@ -869,19 +854,19 @@ bool Iec61107Component::set_sensor_value_(Iec61107SensorBase *sensor, ValueRefsA
   bool ret = true;
 
   uint8_t idx = sensor->get_index() - 1;
-  if (idx >= VAL_NUM) {
-    ESP_LOGE(TAG, "Invalid sensor index %u", idx);
+  if (idx >= protocol::VALUE_SLOTS) {
+    ESP_LOGE(TAG, "Invalid sensor index %u.", idx);
     return false;
   }
   char str_buffer[128] = {'\0'};
-  strncpy(str_buffer, vals[idx], 128);
+  strncpy(str_buffer, vals[idx], sizeof(str_buffer) - 1);
 
   char *str = str_buffer;
   uint8_t sub_idx = sensor->get_sub_index();
   if (sub_idx == 0) {
     ESP_LOGD(TAG, "Got for '%s' (idx = %d) : '%s'", sensor->get_request().c_str(), idx + 1, str);
   } else {
-    str = this->get_nth_value_from_csv_(str, sub_idx);
+    str = protocol::get_nth_value_from_csv(str, sub_idx);
     if (str == nullptr) {
       ESP_LOGE(TAG, "Failed for '%s' (idx = %d, sub_idx = %d)", sensor->get_request().c_str(), idx + 1, sub_idx);
       ESP_LOGE(TAG, "Cannot extract sensor value by sub-index. Is data comma-separated? "
@@ -894,12 +879,15 @@ bool Iec61107Component::set_sensor_value_(Iec61107SensorBase *sensor, ValueRefsA
 
   if (type == SensorType::SENSOR) {
     float f = 0;
-    // todo: for non-energomeras... value can be "100.0" or "100.0*kWh" or "100.0#A"
+    // value can be "100.0" or "100.0*kWh" or "100.0#A"
     ret = str && str[0] && protocol::char2float(str, f);
     if (ret) {
       static_cast<Iec61107Sensor *>(sensor)->set_value(f);
     } else {
-      ESP_LOGE(TAG, "Cannot convert incoming data to a number. Consider using a text sensor. Invalid data: '%s'", str);
+      ESP_LOGE(TAG,
+               "Cannot convert incoming data to a number. Consider using a "
+               "text sensor. Invalid data: '%s'",
+               str);
     }
   } else {
 #ifdef USE_TEXT_SENSOR
@@ -944,13 +932,13 @@ void Iec61107Component::read_reply_and_go_next_state_(ReadFunction read_fn, Stat
 }
 
 void Iec61107Component::prepare_prog_password_frame_(const char *password) {
-  this->buffers_.amount_out = protocol::build_prog_password_frame(
-      this->buffers_.out, MAX_OUT_BUF_SIZE, password, this->crc_method_ == IecCrcMethod::CRC_XOR);
+  this->buffers_.amount_out = protocol::build_prog_password_frame(this->buffers_.out, MAX_OUT_BUF_SIZE, password,
+                                                                  this->crc_method_ == IecCrcMethod::CRC_XOR);
 }
 
 void Iec61107Component::prepare_prog_frame_(const char *request, bool write) {
-  this->buffers_.amount_out = protocol::build_prog_frame(
-      this->buffers_.out, MAX_OUT_BUF_SIZE, request, write, this->crc_method_ == IecCrcMethod::CRC_XOR);
+  this->buffers_.amount_out = protocol::build_prog_frame(this->buffers_.out, MAX_OUT_BUF_SIZE, request, write,
+                                                         this->crc_method_ == IecCrcMethod::CRC_XOR);
 }
 
 void Iec61107Component::prepare_non_session_prog_frame_(const char *request) {
@@ -989,7 +977,7 @@ void Iec61107Component::send_frame_(const uint8_t *data, size_t length) {
 }
 
 size_t Iec61107Component::receive_frame_(FrameStopFunction stop_fn) {
-  const uint32_t read_time_limit_ms = 40;  // 25;
+  constexpr uint32_t read_time_limit_ms = 40;  // 25;
   size_t ret_val;
 
   auto count = this->available();
@@ -1141,14 +1129,6 @@ uint8_t Iec61107Component::get_values_from_brackets_(char *line, ValueRefsArray 
   return protocol::get_values_from_brackets(line, vals, empty_str);
 }
 
-// Get N-th value from comma-separated string, 1-based index
-// line = "20.08.24,0.45991"
-// get_nth_value_from_csv_(line, 1) -> "20.08.24"
-// get_nth_value_from_csv_(line, 2) -> "0.45991"
-char *Iec61107Component::get_nth_value_from_csv_(char *line, uint8_t idx) {
-  return protocol::get_nth_value_from_csv(line, idx);
-}
-
 const char *Iec61107Component::state_to_string(State state) {
   switch (state) {
     case State::NOT_INITIALIZED:
@@ -1195,6 +1175,8 @@ const char *Iec61107Component::state_to_string(State state) {
       return "CLOSE_SESSION";
     case State::PUBLISH:
       return "PUBLISH";
+    case State::SINGLE_READ:
+      return "SINGLE_READ";
     case State::SINGLE_READ_ACK:
       return "SINGLE_READ_ACK";
     default:

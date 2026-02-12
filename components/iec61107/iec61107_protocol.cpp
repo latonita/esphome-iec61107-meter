@@ -10,8 +10,8 @@ namespace iec61107 {
 namespace protocol {
 
 static constexpr uint32_t BAUD_BASE = 300;
-static constexpr std::array<uint8_t, ACK_SET_BAUD_AND_MODE_FRAME_SIZE> ACK_SET_BAUD_AND_MODE_TEMPLATE = {
-    ACK, '0', '5', '1', CR, LF};
+static constexpr std::array<uint8_t, ACK_SET_BAUD_AND_MODE_FRAME_SIZE> ACK_SET_BAUD_AND_MODE_TEMPLATE = {ACK, '0', '5',
+                                                                                                         '1', CR,  LF};
 static constexpr std::array<uint8_t, CLOSE_SESSION_FRAME_SIZE - 1> CLOSE_SESSION_PREFIX = {SOH, 0x42, 0x30, ETX};
 
 static uint32_t byte_to_baud_rate(uint8_t baud_code) {
@@ -138,9 +138,9 @@ size_t build_non_session_prog_frame(uint8_t *out, size_t out_size, const char *m
                                     bool use_xor) {
   // "/?!<SOH>R1<STX>NAME()<ETX><BCC>" broadcast
   // "/?<address>!<SOH>R1<STX>NAME()<ETX><BCC>" direct
-  const int len = std::snprintf((char *) out, out_size, "/?%s!%cR1%c%s%c\xFF",
-                                meter_address != nullptr ? meter_address : "", SOH, STX,
-                                request != nullptr ? request : "", ETX);
+  const int len =
+      std::snprintf((char *) out, out_size, "/?%s!%cR1%c%s%c\xFF", meter_address != nullptr ? meter_address : "", SOH,
+                    STX, request != nullptr ? request : "", ETX);
   if (len <= 0) {
     return 0;
   }

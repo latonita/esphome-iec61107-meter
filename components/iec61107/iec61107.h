@@ -17,6 +17,7 @@
 
 #include "iec61107_uart.h"
 #include "iec61107_sensor.h"
+#include "iec61107_protocol.h"
 #include "object_locker.h"
 
 namespace esphome {
@@ -25,8 +26,7 @@ namespace iec61107 {
 static const size_t MAX_IN_BUF_SIZE = 256;
 static const size_t MAX_OUT_BUF_SIZE = 84;
 
-const uint8_t VAL_NUM = 12;
-using ValueRefsArray = std::array<char *, VAL_NUM>;
+using ValueRefsArray = protocol::ValueRefsArray;
 
 using SensorMap = std::multimap<std::string, Iec61107SensorBase *>;
 using SingleRequests = std::list<std::string>;
@@ -119,6 +119,7 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
     PUBLISH,
     SINGLE_READ,
     SINGLE_READ_ACK,
+    STATE_COUNT,
   } state_{State::NOT_INITIALIZED};
   State last_reported_state_{State::NOT_INITIALIZED};
 
@@ -187,7 +188,6 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
 
   char *extract_meter_id_and_baud_(size_t frame_size);
   uint8_t get_values_from_brackets_(char *line, ValueRefsArray &vals);
-  char *get_nth_value_from_csv_(char *line, uint8_t idx);
   bool set_sensor_value_(Iec61107SensorBase *sensor, ValueRefsArray &vals);
 
   void report_failure(bool failure);
