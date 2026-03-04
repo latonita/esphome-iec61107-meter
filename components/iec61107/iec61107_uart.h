@@ -90,7 +90,7 @@ class Iec61107Uart final : public uart::ESP8266UartComponent {
 class Iec61107Uart final : public uart::IDFUARTComponent {
  public:
   Iec61107Uart(uart::IDFUARTComponent &uart)
-      : uart_(uart), iuart_num_(uart.*(&Iec61107Uart::uart_num_)), ilock_(uart.*(&Iec61107Uart::lock_)) {}
+      : uart_(uart), iuart_num_(uart.*(&Iec61107Uart::uart_num_)) {}
 
   void setup_half_duplex(int8_t flow_control_pin = -1) {
     if (flow_control_pin == -1) {
@@ -113,11 +113,8 @@ class Iec61107Uart final : public uart::IDFUARTComponent {
 
   // Reconfigure baudrate
   bool update_baudrate(uint32_t baudrate) {
-    int err = ESP_OK;
-    xSemaphoreTake(ilock_, portMAX_DELAY);
     uart_flush(iuart_num_);
-    err = uart_set_baudrate(iuart_num_, baudrate);
-    xSemaphoreGive(ilock_);
+    int err = uart_set_baudrate(iuart_num_, baudrate);
     return err == ESP_OK;
   }
 
@@ -142,7 +139,6 @@ class Iec61107Uart final : public uart::IDFUARTComponent {
     size_t length_to_read = len;
     if (!this->check_read_timeout_quick_(len))
       return false;
-    xSemaphoreTake(this->ilock_, portMAX_DELAY);
     if (this->has_peek_) {
       length_to_read--;
       *data = this->peek_byte_;
@@ -151,14 +147,12 @@ class Iec61107Uart final : public uart::IDFUARTComponent {
     }
     if (length_to_read > 0)
       uart_read_bytes(this->iuart_num_, data, length_to_read, TIMEOUT / portTICK_PERIOD_MS);
-    xSemaphoreGive(this->ilock_);
 
     return true;
   }
 
   uart::IDFUARTComponent &uart_;
   uart_port_t iuart_num_;
-  SemaphoreHandle_t &ilock_;
 };
 #endif
 
