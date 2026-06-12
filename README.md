@@ -5,7 +5,10 @@
 [СПб ЗИП ЦЭ2727А](https://github.com/latonita/esphome-ce2727a-meter) •
 [Ленэлектро ЛЕ-2](https://github.com/latonita/esphome-le2-meter) •
 [Пульсар-М](https://github.com/latonita/esphome-pulsar-m) •
-[Энергомера BLE](https://github.com/latonita/esphome-energomera-ble)
+[Энергомера BLE](https://github.com/latonita/esphome-energomera-ble) •
+[Нартис RF433](https://github.com/latonita/esphome-nartis-rf-meter) •
+[Nordic UART (BLE NUS)](https://github.com/latonita/esphome-nordic-uart-ble) •
+
 
 Компонент требует дополнительного тестирования с разными счетчиками - пишите на anton.viktorov@live.com
 
