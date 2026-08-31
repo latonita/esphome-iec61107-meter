@@ -38,7 +38,7 @@ class Iec61107SensorBase {
 
   void set_index(const uint8_t idx) { idx_ = idx; };
   uint8_t get_index() const { return idx_; };
-  
+
   void set_sub_index(const uint8_t sub_idx) { sub_idx_ = sub_idx; };
   uint8_t get_sub_index() const { return sub_idx_; };
 

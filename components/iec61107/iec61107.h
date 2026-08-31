@@ -17,6 +17,7 @@
 
 #include "iec61107_uart.h"
 #include "iec61107_sensor.h"
+#include "iec61107_protocol.h"
 #include "object_locker.h"
 
 namespace esphome {
@@ -25,8 +26,7 @@ namespace iec61107 {
 static const size_t MAX_IN_BUF_SIZE = 256;
 static const size_t MAX_OUT_BUF_SIZE = 84;
 
-const uint8_t VAL_NUM = 12;
-using ValueRefsArray = std::array<char *, VAL_NUM>;
+using ValueRefsArray = protocol::ValueRefsArray;
 
 using SensorMap = std::multimap<std::string, Iec61107SensorBase *>;
 using SingleRequests = std::list<std::string>;
@@ -119,6 +119,7 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
     PUBLISH,
     SINGLE_READ,
     SINGLE_READ_ACK,
+    STATE_COUNT,
   } state_{State::NOT_INITIALIZED};
   State last_reported_state_{State::NOT_INITIALIZED};
 
@@ -164,7 +165,6 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
   void set_baud_rate_(uint32_t baud_rate);
   bool are_baud_rates_different_() const { return baud_rate_handshake_ != baud_rate_negotiated_; }
 
-  uint8_t calculate_crc_prog_frame_(uint8_t *data, size_t length, bool set_crc = false);
   bool check_crc_prog_frame_(uint8_t *data, size_t length);
 
   void prepare_frame_(const uint8_t *data, size_t length);
@@ -188,11 +188,33 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
 
   char *extract_meter_id_and_baud_(size_t frame_size);
   uint8_t get_values_from_brackets_(char *line, ValueRefsArray &vals);
-  char *get_nth_value_from_csv_(char *line, uint8_t idx);
   bool set_sensor_value_(Iec61107SensorBase *sensor, ValueRefsArray &vals);
 
   void report_failure(bool failure);
   void abort_mission_(bool send_close_session = true);
+  void handle_idle_();
+  void handle_try_lock_bus_();
+  void handle_wait_();
+  void handle_waiting_for_response_();
+  void handle_open_session_();
+  void handle_open_session_get_id_();
+  void handle_set_baud_();
+  void handle_ack_read_p0_confirmation_();
+  void handle_ack_start_get_info_();
+  void handle_programming_mode_req_();
+  void handle_programming_mode_ack_();
+  void handle_main_session_();
+  void handle_get_date_();
+  void handle_get_time_();
+  void handle_correct_time_();
+  void handle_recv_correction_result_();
+  void handle_data_enq_();
+  void handle_data_recv_();
+  void handle_data_next_();
+  void handle_close_session_();
+  void handle_publish_();
+  void handle_single_read_();
+  void handle_single_read_ack_();
 
   const char *state_to_string(State state);
   void log_state_(State *next_state = nullptr);
