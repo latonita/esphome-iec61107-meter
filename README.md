@@ -7,8 +7,10 @@
 [Пульсар-М](https://github.com/latonita/esphome-pulsar-m) •
 [Энергомера BLE](https://github.com/latonita/esphome-energomera-ble) •
 [Нартис RF433](https://github.com/latonita/esphome-nartis-rf-meter) •
-[Нартис RF433-2](https://github.com/latonita/esphome-uart-nartis-rf) •
+[Нартис RF433-2](https://github.com/latonita/esphome-nartis-rf-2-meter) •
+[Мост UART↔RF433-2](https://github.com/latonita/esphome-uart-nartis-rf) •
 [Nordic UART (BLE NUS)](https://github.com/latonita/esphome-nordic-uart-ble) •
+
 
 # ESPHome компонент для считывания показаний со счетчиков электроэнергии ГОСТ МЭК/IEC 61107-2011 (type C) через оптопорт или RS-485
 
