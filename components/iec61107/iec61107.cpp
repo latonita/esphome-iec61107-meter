@@ -3,6 +3,7 @@
 #include "esphome/core/application.h"
 #include "esphome/core/time.h"
 #include "iec61107.h"
+#include <cinttypes>
 #include <sstream>
 
 namespace esphome {
@@ -107,7 +108,7 @@ uint32_t byte_to_baud_rate(uint8_t baud_code) {
 }
 
 void Iec61107Component::set_baud_rate_(uint32_t baud_rate) {
-  ESP_LOGV(TAG, "Setting baud rate %u bps", baud_rate);
+  ESP_LOGV(TAG, "Setting baud rate %" PRIu32 " bps", baud_rate);
   if (!iuart_->update_baudrate(baud_rate)) {
     ESP_LOGE(TAG, "Failed to update baud rate");
   }
@@ -118,28 +119,7 @@ void Iec61107Component::setup() {
   if (this->flow_control_pin_ != nullptr) {
     this->flow_control_pin_->setup();
   }
-#ifdef USE_ESP32
-  iuart_ = make_unique<Iec61107Uart>(*static_cast<uart::IDFUARTComponent *>(this->parent_));
-  // if (this->flow_control_pin_ != nullptr) {
-  //   if (this->flow_control_pin_->is_internal()) {
-  //     ESP_LOGI(TAG, "Flow control pin is internal GPIO pin, half-duplex mode is enabled in UART driver");
-  //     auto pin = static_cast<InternalGPIOPin *>(this->flow_control_pin_);
-  //     if (pin != nullptr && pin->get_pin() >= 0) {
-  //       ESP_LOGI(TAG, "Flow control pin: GPIO%d", pin->get_pin());
-  //       iuart_->setup_half_duplex(32);  //
-  //       // pin->get_pin());
-  //     } else {
-  //       ESP_LOGW(TAG, "Flow control pin is not set, using default GPIO");
-  //     }
-  //   } else {
-  //     ESP_LOGW(TAG, "Flow control pin is not internal GPIO pin, half-duplex mode is manual");
-  //   }
-  // }
-#endif
-
-#if USE_ESP8266
-  iuart_ = make_unique<Iec61107Uart>(*static_cast<uart::ESP8266UartComponent *>(this->parent_));
-#endif
+  iuart_ = make_unique<Iec61107Uart>(this->parent_);
 
   this->set_baud_rate_(this->baud_rate_handshake_);
   this->set_timeout(BOOT_WAIT_S * 1000, [this]() {
@@ -156,7 +136,7 @@ void Iec61107Component::dump_config() {
 
   LOG_UPDATE_INTERVAL(this);
   LOG_PIN("  Flow Control Pin: ", this->flow_control_pin_);
-  ESP_LOGCONFIG(TAG, "  Receive Timeout: %ums", this->receive_timeout_ms_);
+  ESP_LOGCONFIG(TAG, "  Receive Timeout: %" PRIu32 "ms", this->receive_timeout_ms_);
   ESP_LOGCONFIG(TAG, "  Sensors:");
   for (const auto &sensors : sensors_) {
     auto &s = sensors.second;
@@ -591,7 +571,7 @@ void Iec61107Component::loop() {
         return;
       }
 
-      ESP_LOGD(TAG, "Time correction needed: %d seconds", correction_seconds);
+      ESP_LOGD(TAG, "Time correction needed: %" PRId32 " seconds", correction_seconds);
 
       constexpr int32_t SECONDS_IN_24H = 24 * 3600;
 
@@ -607,10 +587,10 @@ void Iec61107Component::loop() {
       } else if (correction_seconds < -29) {
         correction_seconds = -29;
       }
-      ESP_LOGD(TAG, "Setting time correction within +/- 29 seconds: %d", correction_seconds);
+      ESP_LOGD(TAG, "Setting time correction within +/- 29 seconds: %" PRId32, correction_seconds);
 
       char set_time_cmd[16]{0};
-      size_t len = snprintf(set_time_cmd, sizeof(set_time_cmd), "CTIME(%d)", correction_seconds);
+      size_t len = snprintf(set_time_cmd, sizeof(set_time_cmd), "CTIME(%" PRId32 ")", correction_seconds);
       this->prepare_prog_frame_(set_time_cmd, true);
       this->send_frame_prepared_();
       auto read_fn = [this]() { return this->receive_frame_ack_nak_(); };
@@ -741,7 +721,7 @@ void Iec61107Component::loop() {
       }
       this->set_next_state_(State::PUBLISH);
 
-      ESP_LOGD(TAG, "Total connection time: %u ms", millis() - this->loop_state_.session_started_ms);
+      ESP_LOGD(TAG, "Total connection time: %" PRIu32 " ms", millis() - this->loop_state_.session_started_ms);
       this->loop_state_.sensor_iter = this->sensors_.begin();
       break;
 
@@ -815,7 +795,7 @@ void Iec61107Component::sync_device_time() {
 #endif
 
 void Iec61107Component::set_device_time(uint32_t timestamp) {
-  ESP_LOGD(TAG, "set_device_time: %u", timestamp);
+  ESP_LOGD(TAG, "set_device_time: %" PRIu32, timestamp);
   if (!timestamp)
     return;
   this->time_to_set_ = timestamp;
@@ -902,7 +882,7 @@ void Iec61107Component::set_next_state_delayed_(uint32_t ms, State next_state) {
   if (ms == 0) {
     set_next_state_(next_state);
   } else {
-    ESP_LOGV(TAG, "Short delay for %u ms", ms);
+    ESP_LOGV(TAG, "Short delay for %" PRIu32 " ms", ms);
     set_next_state_(State::WAIT);
     wait_.start_time = millis();
     wait_.delay_ms = ms;
@@ -1149,11 +1129,11 @@ char *Iec61107Component::extract_meter_id_and_baud_(size_t frame_size) {
     uint32_t baud = 300;
     if (baud_code < '0' || baud_code > '6') {
       ESP_LOGE(TAG, "Meter is not Type C (IEC-61107/IEC-62056). Reported baud code = '%c'", baud_code);
-      this->status_set_error("Meter is not Type C (IEC-61107/IEC-62056)");
+      this->status_set_error(LOG_STR("Meter is not Type C (IEC-61107/IEC-62056)"));
       ident = nullptr;
     } else {
       baud = byte_to_baud_rate((uint8_t) baud_code);
-      ESP_LOGD(TAG, " - Supported baud rate: %d (code '%c')", baud, baud_code);
+      ESP_LOGD(TAG, " - Supported baud rate: %" PRIu32 " (code '%c')", baud, baud_code);
       this->baud_rate_negotiated_ = baud;
     }
   }
@@ -1273,10 +1253,10 @@ void Iec61107Component::log_state_(State *next_state) {
 void Iec61107Component::stats_dump_() {
   ESP_LOGV(TAG, "============================================");
   ESP_LOGV(TAG, "Data collection and publishing finished.");
-  ESP_LOGV(TAG, "Total number of sessions ............. %u", this->stats_.connections_tried_);
-  ESP_LOGV(TAG, "Total number of invalid frames ....... %u", this->stats_.invalid_frames_);
-  ESP_LOGV(TAG, "Total number of CRC errors ........... %u", this->stats_.crc_errors_);
-  ESP_LOGV(TAG, "Total number of CRC errors recovered . %u", this->stats_.crc_errors_recovered_);
+  ESP_LOGV(TAG, "Total number of sessions ............. %" PRIu32, this->stats_.connections_tried_);
+  ESP_LOGV(TAG, "Total number of invalid frames ....... %" PRIu32, this->stats_.invalid_frames_);
+  ESP_LOGV(TAG, "Total number of CRC errors ........... %" PRIu32, this->stats_.crc_errors_);
+  ESP_LOGV(TAG, "Total number of CRC errors recovered . %" PRIu32, this->stats_.crc_errors_recovered_);
   ESP_LOGV(TAG, "CRC errors per session ............... %f", this->stats_.crc_errors_per_session());
   ESP_LOGV(TAG, "Number of failures ................... %u", this->stats_.failures_);
   ESP_LOGV(TAG, "============================================");
