@@ -1,5 +1,5 @@
 import re
-from esphome import pins
+from esphome import automation, pins
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import uart, binary_sensor, time
@@ -41,6 +41,9 @@ CONF_BAUD_RATE_HANDSHAKE = "baud_rate_handshake"
 CONF_PROGRAMMING_MODE = "programming_mode"
 CONF_CRC_METHOD = "crc_method"
 
+CONF_ON_MEASUREMENT_START = "on_measurement_start"
+CONF_ON_MEASUREMENT_END = "on_measurement_end"
+CONF_ON_MEASUREMENT_ERROR = "on_measurement_error"
 
 iec61107_ns = cg.esphome_ns.namespace("iec61107")
 Iec61107 = iec61107_ns.class_(
