@@ -126,6 +126,7 @@ void Iec61107Component::setup() {
     ESP_LOGD(TAG, "Boot timeout, component is ready to use");
     this->clear_rx_buffers_();
     this->set_next_state_(State::IDLE);
+    this->update();
   });
 
   this->calculate_crc_prog_frame_(CMD_CLOSE_SESSION, CMD_CLOSE_SESSION_LEN, true);
