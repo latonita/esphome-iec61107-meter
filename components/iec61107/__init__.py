@@ -115,6 +115,9 @@ CONFIG_SCHEMA = cv.All(
                 cv.string, validate_meter_password
             ),
             cv.Optional(CONF_CRC_METHOD, default="SUM7"): cv.enum(CRC_METHOD_OPTIONS),
+            cv.Optional(CONF_ON_MEASUREMENT_START): automation.validate_automation({}),
+            cv.Optional(CONF_ON_MEASUREMENT_END): automation.validate_automation({}),
+            cv.Optional(CONF_ON_MEASUREMENT_ERROR): automation.validate_automation({}),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -126,6 +129,16 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
+
+    await automation.build_callback_automations(
+        var,
+        config,
+        {
+            CONF_ON_MEASUREMENT_START: "add_on_measurement_start_callback",
+            CONF_ON_MEASUREMENT_END: "add_on_measurement_end_callback",
+            CONF_ON_MEASUREMENT_ERROR: "add_on_measurement_error_callback",
+        },
+    )
 
     if flow_control_pin := config.get(CONF_FLOW_CONTROL_PIN):
         pin = await cg.gpio_pin_expression(flow_control_pin)
