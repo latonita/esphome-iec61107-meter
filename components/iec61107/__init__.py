@@ -124,6 +124,20 @@ CONFIG_SCHEMA = cv.All(
     .extend(uart.UART_DEVICE_SCHEMA)
 )
 
+_CALLBACK_AUTOMATIONS = (
+    automation.CallbackAutomation(
+        CONF_ON_MEASUREMENT_START,
+        "add_on_measurement_start_callback",
+    ),
+    automation.CallbackAutomation(
+        CONF_ON_MEASUREMENT_END,
+        "add_on_measurement_end_callback",
+    ),
+    automation.CallbackAutomation(
+        CONF_ON_MEASUREMENT_ERROR,
+        "add_on_measurement_error_callback",
+    ),
+)
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
@@ -133,11 +147,7 @@ async def to_code(config):
     await automation.build_callback_automations(
         var,
         config,
-        {
-            CONF_ON_MEASUREMENT_START: "add_on_measurement_start_callback",
-            CONF_ON_MEASUREMENT_END: "add_on_measurement_end_callback",
-            CONF_ON_MEASUREMENT_ERROR: "add_on_measurement_error_callback",
-        },
+        _CALLBACK_AUTOMATIONS
     )
 
     if flow_control_pin := config.get(CONF_FLOW_CONTROL_PIN):
