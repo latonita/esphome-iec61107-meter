@@ -4,6 +4,7 @@
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/core/helpers.h"
 
 #ifdef USE_TIME
 #include "esphome/components/time/real_time_clock.h"
@@ -59,6 +60,12 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
   void set_password(const std::string &pass) { this->password_ = pass; };
   void set_crc_method(IecCrcMethod method) { this->crc_method_ = method; };
 
+  void add_on_measurement_start_callback(std::function<void()> &&callback) { this->measurement_start_callback_.add(std::move(callback)); }
+  
+  void add_on_measurement_end_callback(std::function<void()> &&callback) { this->measurement_end_callback_.add(std::move(callback)); }
+  
+  void add_on_measurement_error_callback(std::function<void()> &&callback) { this->measurement_error_callback_.add(std::move(callback)); }
+
   void queue_single_read(const std::string &req);
 
 #ifdef USE_TIME
@@ -71,6 +78,10 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
   std::string meter_address_{""};
   uint32_t receive_timeout_ms_{500};
   uint32_t delay_between_requests_ms_{50};
+
+  CallbackManager<void()> measurement_start_callback_;
+  CallbackManager<void()> measurement_end_callback_;
+  CallbackManager<void()> measurement_error_callback_;
 
   GPIOPin *flow_control_pin_{nullptr};
   std::unique_ptr<Iec61107Uart> iuart_;
