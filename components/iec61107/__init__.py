@@ -1,5 +1,5 @@
 import re
-from esphome import pins
+from esphome import automation, pins
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import uart, binary_sensor, time
@@ -41,6 +41,9 @@ CONF_BAUD_RATE_HANDSHAKE = "baud_rate_handshake"
 CONF_PROGRAMMING_MODE = "programming_mode"
 CONF_CRC_METHOD = "crc_method"
 
+CONF_ON_MEASUREMENT_START = "on_measurement_start"
+CONF_ON_MEASUREMENT_END = "on_measurement_end"
+CONF_ON_MEASUREMENT_ERROR = "on_measurement_error"
 
 iec61107_ns = cg.esphome_ns.namespace("iec61107")
 Iec61107 = iec61107_ns.class_(
@@ -112,17 +115,40 @@ CONFIG_SCHEMA = cv.All(
                 cv.string, validate_meter_password
             ),
             cv.Optional(CONF_CRC_METHOD, default="SUM7"): cv.enum(CRC_METHOD_OPTIONS),
+            cv.Optional(CONF_ON_MEASUREMENT_START): automation.validate_automation({}),
+            cv.Optional(CONF_ON_MEASUREMENT_END): automation.validate_automation({}),
+            cv.Optional(CONF_ON_MEASUREMENT_ERROR): automation.validate_automation({}),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
     .extend(uart.UART_DEVICE_SCHEMA)
 )
 
+_CALLBACK_AUTOMATIONS = (
+    automation.CallbackAutomation(
+        CONF_ON_MEASUREMENT_START,
+        "add_on_measurement_start_callback",
+    ),
+    automation.CallbackAutomation(
+        CONF_ON_MEASUREMENT_END,
+        "add_on_measurement_end_callback",
+    ),
+    automation.CallbackAutomation(
+        CONF_ON_MEASUREMENT_ERROR,
+        "add_on_measurement_error_callback",
+    ),
+)
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
+
+    await automation.build_callback_automations(
+        var,
+        config,
+        _CALLBACK_AUTOMATIONS
+    )
 
     if flow_control_pin := config.get(CONF_FLOW_CONTROL_PIN):
         pin = await cg.gpio_pin_expression(flow_control_pin)

@@ -160,6 +160,9 @@ void Iec61107Component::abort_mission_(bool send_close_session) {
     this->set_baud_rate_(this->baud_rate_handshake_);
   }
   this->unlock_uart_session_();
+
+  this->measurement_error_callback_.call();
+  
   this->set_next_state_(State::IDLE);
   this->report_failure(true);
 }
@@ -741,6 +744,9 @@ void Iec61107Component::loop() {
         }
         this->report_failure(false);
         this->unlock_uart_session_();
+
+        this->measurement_end_callback_.call();
+        
         this->set_next_state_(State::IDLE);
       }
       break;
@@ -766,6 +772,9 @@ void Iec61107Component::update() {
     return;
   }
   ESP_LOGD(TAG, "Starting data collection");
+  
+  this->measurement_start_callback_.call();
+  
   this->set_next_state_(State::TRY_LOCK_BUS);
 }
 
