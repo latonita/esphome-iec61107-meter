@@ -207,6 +207,7 @@ class Iec61107Component : public PollingComponent, public uart::UARTDevice {
 
   const char *state_to_string(State state);
   void log_state_(State *next_state = nullptr);
+  void log_hex_(const char *dir, const uint8_t *data, size_t len);
 
   struct Stats {
     uint32_t connections_tried_{0};

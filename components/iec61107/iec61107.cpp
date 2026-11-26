@@ -3,13 +3,14 @@
 #include "esphome/core/application.h"
 #include "esphome/core/time.h"
 #include "iec61107.h"
+#include <algorithm>
 #include <cinttypes>
 #include <sstream>
 
 namespace esphome {
 namespace iec61107 {
 
-static const char *TAG0 = "iec61107_";
+static constexpr char TAG0[] = "iec61107_";
 #define TAG (this->tag_.c_str())
 
 static constexpr uint8_t SOH = 0x01;
@@ -268,7 +269,7 @@ void Iec61107Component::loop() {
         // most likely its CRC error in STX/SOH/ETX. unclear.
         this->stats_.crc_errors_++;
         ESP_LOGV(TAG, "RX: %s", format_frame_pretty(this->buffers_.in, this->buffers_.amount_in).c_str());
-        ESP_LOGVV(TAG, "RX: %s", format_hex_pretty(this->buffers_.in, this->buffers_.amount_in).c_str());
+        this->log_hex_("RX", this->buffers_.in, this->buffers_.amount_in);
       }
       this->clear_rx_buffers_();
 
@@ -964,7 +965,7 @@ void Iec61107Component::send_frame_prepared_() {
     this->flow_control_pin_->digital_write(false);
 
   ESP_LOGV(TAG, "TX: %s", format_frame_pretty(this->buffers_.out, this->buffers_.amount_out).c_str());
-  ESP_LOGVV(TAG, "TX: %s", format_hex_pretty(this->buffers_.out, this->buffers_.amount_out).c_str());
+  this->log_hex_("TX", this->buffers_.out, this->buffers_.amount_out);
 }
 
 void Iec61107Component::prepare_frame_(const uint8_t *data, size_t length) {
@@ -1008,7 +1009,7 @@ size_t Iec61107Component::receive_frame_(FrameStopFunction stop_fn) {
 
     if (stop_fn(this->buffers_.in, this->buffers_.amount_in)) {
       ESP_LOGV(TAG, "RX: %s", format_frame_pretty(this->buffers_.in, this->buffers_.amount_in).c_str());
-      ESP_LOGVV(TAG, "RX: %s", format_hex_pretty(this->buffers_.in, this->buffers_.amount_in).c_str());
+      this->log_hex_("RX", this->buffers_.in, this->buffers_.amount_in);
       ret_val = this->buffers_.amount_in;
       this->buffers_.amount_in = 0;
       this->update_last_rx_time_();
@@ -1288,7 +1289,25 @@ void Iec61107Component::unlock_uart_session_() {
 
 uint8_t Iec61107Component::next_obj_id_ = 0;
 
-std::string Iec61107Component::generateTag() { return str_sprintf("%s%03d", TAG0, ++next_obj_id_); }
+// Hex dump at VERY_VERBOSE, split into short lines: keeps the stack buffer small
+// and stays under the logger's line length limit.
+void Iec61107Component::log_hex_(const char *dir, const uint8_t *data, size_t len) {
+#if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERY_VERBOSE
+  static constexpr size_t CHUNK = 32;
+  char hex_buf[format_hex_pretty_size(CHUNK)];
+  for (size_t off = 0; off < len; off += CHUNK) {
+    size_t n = std::min(CHUNK, len - off);
+    ESP_LOGVV(TAG, "%s[%u]: %s", dir, static_cast<unsigned>(off), format_hex_pretty_to(hex_buf, data + off, n, '.'));
+  }
+#endif
+}
+
+std::string Iec61107Component::generateTag() {
+  // %03d of uint8_t is at most 3 digits; sizeof(TAG0) includes the trailing NUL.
+  char buf[sizeof(TAG0) + 3];
+  buf_append_printf(buf, sizeof(buf), 0, "%s%03d", TAG0, ++next_obj_id_);
+  return buf;
+}
 
 }  // namespace iec61107
 }  // namespace esphome
