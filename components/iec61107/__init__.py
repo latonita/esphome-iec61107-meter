@@ -63,8 +63,9 @@ def validate_request_format(value):
     if not value.endswith(")"):
         value += "()"
 
-    pattern = r"\b[a-zA-Z0-9_][a-zA-Z0-9_]*\s*\([^)]*\)$"
-    if not re.match(pattern, value):
+    # Allow IEC 62056-21 style codes too: 1.8.0, C.1.0, 1.8.0*1, 1-0:1.8.0
+    pattern = r"[a-zA-Z0-9_][a-zA-Z0-9_.:*-]*\s*\([^)]*\)"
+    if not re.fullmatch(pattern, value):
         raise cv.Invalid(
             "Invalid request format. Proper is 'REQUEST' or 'REQUEST()' or 'REQUEST(ARGS)'"
         )
